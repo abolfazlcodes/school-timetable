@@ -1,10 +1,30 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useSyncExternalStore } from "react";
 
 export type Theme = "light" | "dark" | "system";
 interface ThemeContextValue { theme: Theme; setTheme: (theme: Theme) => void }
 const ThemeContext = createContext<ThemeContextValue | null>(null);
+const themeListeners = new Set<() => void>();
+
+function getStoredTheme(): Theme {
+  const stored = localStorage.getItem("school-panel-theme") as Theme | null;
+  return stored && ["light", "dark", "system"].includes(stored) ? stored : "system";
+}
+
+function getServerTheme(): Theme {
+  return "system";
+}
+
+function subscribeToTheme(listener: () => void) {
+  const onStorage = (event: StorageEvent) => event.key === "school-panel-theme" && listener();
+  themeListeners.add(listener);
+  window.addEventListener("storage", onStorage);
+  return () => {
+    themeListeners.delete(listener);
+    window.removeEventListener("storage", onStorage);
+  };
+}
 
 function applyTheme(theme: Theme) {
   const root = document.documentElement;
@@ -16,11 +36,7 @@ function applyTheme(theme: Theme) {
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>(() => {
-    if (typeof window === "undefined") return "system";
-    const stored = localStorage.getItem("school-panel-theme") as Theme | null;
-    return stored && ["light", "dark", "system"].includes(stored) ? stored : "system";
-  });
+  const theme = useSyncExternalStore<Theme>(subscribeToTheme, getStoredTheme, getServerTheme);
 
   useEffect(() => {
     applyTheme(theme);
@@ -36,9 +52,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo(() => ({
     theme,
     setTheme: (next: Theme) => {
-      setThemeState(next);
       localStorage.setItem("school-panel-theme", next);
       applyTheme(next);
+      themeListeners.forEach((listener) => listener());
     },
   }), [theme]);
 

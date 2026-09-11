@@ -4,6 +4,7 @@ import { requireRole } from "@/modules/tenancy/types";
 import type { ActionState } from "@/modules/planning/action-state";
 import { calculateSuggestedClassCount, distributeStudents, integerFromForm, nonNegativeInteger, positiveInteger } from "@/modules/planning/domain";
 import type { AcademicStructureRepository } from "./repository";
+import { validateSchoolDayTimeline, type SchoolDayTimeline } from "./school-day-timeline";
 
 const uuid = z.string().uuid("شناسه انتخاب‌شده معتبر نیست.");
 const name = (label: string, max: number) => z.string().trim().min(2, `${label} باید حداقل ۲ نویسه باشد.`).max(max, `${label} بیش از حد طولانی است.`);
@@ -28,23 +29,18 @@ const classPlanSchema = z.object({
 });
 const classGroupSchema = z.object({ classGroupId: uuid, name: name("نام کلاس", 80), isActive: z.boolean() });
 const schoolDaySchema = z.object({ academicYearId: uuid, dayOfWeek: nonNegativeInteger("روز هفته", 6), label: name("نام روز", 24), sortOrder: nonNegativeInteger("ترتیب", 6) });
-const periodSchema = z.object({
+const clock = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "ساعت معتبر نیست.");
+const timelineSchema = z.object({
   academicYearId: uuid,
   schoolDayId: uuid,
-  position: positiveInteger("شماره زنگ", 20),
-  label: name("عنوان زنگ", 32),
-  startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "ساعت شروع معتبر نیست."),
-  endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "ساعت پایان معتبر نیست."),
-  breakAfterMinutes: nonNegativeInteger("زمان استراحت", 180),
-}).refine((value) => value.endTime > value.startTime, { path: ["endTime"], message: "ساعت پایان باید بعد از ساعت شروع باشد." });
-const periodUpdateSchema = z.object({
-  periodId: uuid,
-  label: name("عنوان زنگ", 32),
-  startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "ساعت شروع معتبر نیست."),
-  endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "ساعت پایان معتبر نیست."),
-  breakAfterMinutes: nonNegativeInteger("زمان استراحت", 180),
-  isActive: z.boolean(),
-}).refine((value) => value.endTime > value.startTime, { path: ["endTime"], message: "ساعت پایان باید بعد از ساعت شروع باشد." });
+  mode: z.enum(["AUTO", "MANUAL"]),
+  startTime: clock,
+  endTime: clock,
+  periodCount: z.number().int().min(1).max(20),
+  defaultBreakMinutes: z.number().int().min(0).max(180),
+  periods: z.array(z.object({ position: z.number().int().min(1).max(20), label: name("عنوان زنگ", 32), startTime: clock, endTime: clock })).min(1).max(20),
+  intermissions: z.array(z.object({ afterPeriodPosition: z.number().int().min(1).max(19), kind: z.enum(["BREAK", "TRANSITION"]), startTime: clock, endTime: clock })).max(19),
+});
 
 function validationError(error: z.ZodError): ActionState {
   return { status: "error", message: "اطلاعات واردشده را بررسی کنید.", fieldErrors: error.flatten().fieldErrors as Record<string, string[]> };
@@ -126,20 +122,6 @@ export async function addSchoolDay(context: TenantContext, input: unknown, repos
   return { status: "success", message: "روز کاری افزوده شد." };
 }
 
-function minutes(time: string) { const [hour, minute] = time.split(":").map(Number); return hour * 60 + minute; }
-
-export async function addPeriod(context: TenantContext, input: unknown, repository: AcademicStructureRepository): Promise<ActionState> {
-  requireRole(context, ["ADMIN", "VICE_PRINCIPAL"]);
-  const parsed = periodSchema.safeParse(input);
-  if (!parsed.success) return validationError(parsed.error);
-  const workspace = await repository.getWorkspace(context);
-  const day = workspace.schoolDays.find((item) => item.id === parsed.data.schoolDayId && workspace.activeAcademicYear?.id === parsed.data.academicYearId);
-  if (!day) return { status: "error", message: "روز کاری در سال فعال پیدا نشد." };
-  const overlaps = day.periods.some((period) => period.isActive && minutes(parsed.data.startTime) < minutes(period.endTime.slice(0, 5)) && minutes(parsed.data.endTime) > minutes(period.startTime.slice(0, 5)));
-  if (overlaps) return { status: "error", message: "بازه این زنگ با یکی از زنگ‌های همان روز تداخل دارد." };
-  return await repository.addPeriod(context, parsed.data) ? { status: "success", message: "زنگ درسی افزوده شد." } : { status: "error", message: "روز کاری معتبر نیست." };
-}
-
 export async function setSchoolDayStatus(context: TenantContext, input: unknown, repository: AcademicStructureRepository): Promise<ActionState> {
   requireRole(context, ["ADMIN", "VICE_PRINCIPAL"]);
   const parsed = statusSchema.safeParse(input);
@@ -147,14 +129,14 @@ export async function setSchoolDayStatus(context: TenantContext, input: unknown,
   return await repository.updateSchoolDayStatus(context, parsed.data.id, parsed.data.isActive) ? { status: "success", message: "وضعیت روز کاری تغییر کرد." } : { status: "error", message: "روز کاری در مدرسه فعال پیدا نشد." };
 }
 
-export async function editPeriod(context: TenantContext, input: unknown, repository: AcademicStructureRepository): Promise<ActionState> {
+export async function saveSchoolDaySchedule(context: TenantContext, input: unknown, repository: AcademicStructureRepository): Promise<ActionState> {
   requireRole(context, ["ADMIN", "VICE_PRINCIPAL"]);
-  const parsed = periodUpdateSchema.safeParse(input);
+  const parsed = timelineSchema.safeParse(input);
   if (!parsed.success) return validationError(parsed.error);
-  const workspace = await repository.getWorkspace(context);
-  const day = workspace.schoolDays.find((item) => item.periods.some((period) => period.id === parsed.data.periodId));
-  if (!day) return { status: "error", message: "زنگ در مدرسه فعال پیدا نشد." };
-  const overlaps = parsed.data.isActive && day.periods.some((period) => period.id !== parsed.data.periodId && period.isActive && minutes(parsed.data.startTime) < minutes(period.endTime.slice(0, 5)) && minutes(parsed.data.endTime) > minutes(period.startTime.slice(0, 5)));
-  if (overlaps) return { status: "error", message: "بازه این زنگ با یکی از زنگ‌های همان روز تداخل دارد." };
-  return await repository.updatePeriod(context, parsed.data) ? { status: "success", message: "زنگ درسی به‌روزرسانی شد." } : { status: "error", message: "زنگ در مدرسه فعال پیدا نشد." };
+  const timeline = parsed.data as SchoolDayTimeline & { academicYearId: string; schoolDayId: string };
+  const errors = validateSchoolDayTimeline(timeline);
+  if (errors.length) return { status: "error", message: errors[0], fieldErrors: { timeline: errors } };
+  return await repository.saveDaySchedule(context, timeline.academicYearId, timeline.schoolDayId, timeline)
+    ? { status: "success", message: "برنامه زنگ‌های این روز ذخیره شد." }
+    : { status: "error", message: "روز کاری در مدرسه و سال فعال پیدا نشد." };
 }

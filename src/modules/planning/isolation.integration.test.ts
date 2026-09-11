@@ -19,7 +19,7 @@ describe("جداسازی ورودی‌های برنامه‌ریزی", () => {
   it("reference مدرسه دیگر را در repository و DB رد می‌کند", async () => {
     const client = new PGlite();
     try {
-      for (const migrationName of ["0000_auth_and_schools.sql", "0001_planning_inputs.sql", "0002_planning_invariants.sql", "0003_schedule_runs.sql", "0004_schedule_workspaces.sql", "0005_schedule_versions.sql", "0006_hardening_invariants.sql", "0007_period_overlap_upsert.sql"]) await client.exec(await readFile(new URL(`../../../migrations/${migrationName}`, import.meta.url), "utf8"));
+      for (const migrationName of ["0000_auth_and_schools.sql", "0001_planning_inputs.sql", "0002_planning_invariants.sql", "0003_schedule_runs.sql", "0004_schedule_workspaces.sql", "0005_schedule_versions.sql", "0006_hardening_invariants.sql", "0007_period_overlap_upsert.sql", "0008_school_day_timeline.sql"]) await client.exec(await readFile(new URL(`../../../migrations/${migrationName}`, import.meta.url), "utf8"));
       const db = drizzle(client, { schema });
       await db.insert(users).values({ id: ids.user, email: "admin@example.com", fullName: "مدیر", passwordHash: "hash" });
       await db.insert(schools).values([{ id: ids.schoolA, name: "مدرسه الف" }, { id: ids.schoolB, name: "مدرسه ب" }]);

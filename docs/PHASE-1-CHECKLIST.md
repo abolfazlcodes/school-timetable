@@ -150,6 +150,31 @@
 
 معیار پذیرش: جریان تعریف‌شده Done بدون ویرایش دستی DB طی می‌شود و تست‌های حیاتی سبزند. **قبول شد: ۷۳ آزمون unit/integration، ۱۱ جریان Playwright، lint، typecheck، build تولیدی، migration/seed تکرارپذیر و benchmark مستقل solver همگی موفق‌اند. benchmark مرجع ۱۲ کلاس، ۴۸ جلسه و ۸ دبیر را در budget سه‌ثانیه‌ای با نتیجه معتبر و اعتبارسنجی مستقل حل کرد.**
 
+## Post-Phase-1 Correction — Period Scheduling & Visual Polish
+
+- [x] Flexible school day model
+- [x] Automatic period calculation
+- [x] Manual period configuration
+- [x] Variable period duration
+- [x] Variable breaks
+- [x] No-break transitions
+- [x] Accurate school start/end handling
+- [x] Teacher availability integration
+- [x] Period validation
+- [x] Font size review
+- [x] Typography review
+- [x] Full light-theme visual review
+- [x] Full dark-theme visual review
+- [x] RTL review
+- [x] Responsive review
+- [x] Timetable visual review
+- [x] Component consistency review
+- [x] Regression tests
+- [x] Build/typecheck/lint
+- [x] Final visual verification
+
+معیار پذیرش اصلاح: خط زمانی روز با زنگ و فاصلهٔ مستقل در حالت خودکار/دستی، مدت‌های نامساوی و پایان دقیق پشتیبانی می‌شود؛ availability و solver همچنان با هویت روز+زنگ کار می‌کنند و ساعت دقیق در رابط نمایش داده می‌شود. **قبول شد: ۸۲ آزمون unit/integration و ۱۳ جریان Playwright موفق؛ migration/seed برای بار دوم موفق؛ lint، typecheck، build تولیدی و benchmark مستقل solver سبز؛ ۱۵ نمای واقعی شامل login، dashboard، همهٔ بخش‌های workflow، timetable/edit، light/dark و desktop/tablet/mobile ثبت و بازبینی شد.**
+
 ## معیارهای ساده‌سازی UI
 
 - [x] Sidebar بدون بخش غیرضروری و فقط پنج مقصد است
@@ -182,6 +207,7 @@
 - Stage 5: workspace واحد کلاس/دبیر، grid برنامه، اصلاح دستی امن، validation زمینه‌ای و چاپ.
 - Stage 6: نسخه‌های immutable، انتشار و بایگانی، fork، تاریخچه، PDF/Excel/print و داشبورد واقعی.
 - Stage 7: سخت‌سازی invariantهای DB و مرز خروجی، آزمون امنیت tenant و نشست، جریان کامل تولید مجدد، benchmark solver و راهنمای اجرای نهایی.
+- اصلاح پس از فاز یک: مدل خط زمانی منعطف با break/transition مستقل، محاسبهٔ خودکار و override دستی، اعتبارسنجی دامنه/DB، نمایش ساعت دقیق در حضور و برنامه، و بازبینی کامل typography و رابط رندرشده.
 
 ## باقی‌مانده
 

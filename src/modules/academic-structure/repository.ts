@@ -2,8 +2,9 @@ import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import type { PgDatabase } from "drizzle-orm/pg-core";
 import type { PgQueryResultHKT } from "drizzle-orm/pg-core/session";
 import * as schema from "@/db/schema";
-import { academicYears, classGroups, classPlans, grades, majors, periods, schoolDays } from "@/db/schema";
+import { academicYears, classGroups, classPlans, grades, majors, periods, schoolBreaks, schoolDays, schoolDaySchedules } from "@/db/schema";
 import type { TenantContext } from "@/modules/tenancy/types";
+import type { SchoolDayTimeline } from "./school-day-timeline";
 
 export interface AcademicYearView { id: string; title: string; startYear: number; endYear: number; isActive: boolean }
 export interface GradeView { id: string; name: string; code: string; sortOrder: number; isActive: boolean }
@@ -22,7 +23,7 @@ export interface ClassPlanView {
   classes: ClassGroupView[];
 }
 export interface PeriodView { id: string; position: number; label: string; startTime: string; endTime: string; breakAfterMinutes: number; isActive: boolean }
-export interface SchoolDayView { id: string; dayOfWeek: number; label: string; sortOrder: number; isActive: boolean; periods: PeriodView[] }
+export interface SchoolDayView { id: string; dayOfWeek: number; label: string; sortOrder: number; isActive: boolean; periods: PeriodView[]; schedule: SchoolDayTimeline | null }
 export interface StructureWorkspaceData {
   academicYears: AcademicYearView[];
   activeAcademicYear: AcademicYearView | null;
@@ -47,9 +48,8 @@ export interface AcademicStructureRepository {
   saveClassPlan(context: TenantContext, input: { academicYearId: string; gradeId: string; majorId: string | null; studentCount: number; maxClassCapacity: number; classCountOverride: number | null; groups: NewClassGroup[] }): Promise<void>;
   updateClassGroup(context: TenantContext, input: { classGroupId: string; name: string; isActive: boolean }): Promise<boolean>;
   addSchoolDay(context: TenantContext, input: { academicYearId: string; dayOfWeek: number; label: string; sortOrder: number }): Promise<void>;
-  addPeriod(context: TenantContext, input: { academicYearId: string; schoolDayId: string; position: number; label: string; startTime: string; endTime: string; breakAfterMinutes: number }): Promise<boolean>;
   updateSchoolDayStatus(context: TenantContext, schoolDayId: string, isActive: boolean): Promise<boolean>;
-  updatePeriod(context: TenantContext, input: { periodId: string; label: string; startTime: string; endTime: string; breakAfterMinutes: number; isActive: boolean }): Promise<boolean>;
+  saveDaySchedule(context: TenantContext, academicYearId: string, schoolDayId: string, timeline: SchoolDayTimeline): Promise<boolean>;
 }
 
 export function createAcademicStructureRepository<TQueryResult extends PgQueryResultHKT>(db: PgDatabase<TQueryResult, typeof schema>): AcademicStructureRepository {
@@ -66,7 +66,7 @@ export function createAcademicStructureRepository<TQueryResult extends PgQueryRe
       const activeAcademicYear = yearRows.find((year) => year.isActive) ?? null;
       if (!activeAcademicYear) return { academicYears: yearRows, activeAcademicYear: null, grades: gradeRows, majors: majorRows, classPlans: [], schoolDays: [] };
 
-      const [planRows, classRows, dayRows, periodRows] = await Promise.all([
+      const [planRows, classRows, dayRows, periodRows, scheduleRows, breakRows] = await Promise.all([
         db.select({ id: classPlans.id, academicYearId: classPlans.academicYearId, gradeId: classPlans.gradeId, gradeName: grades.name, majorId: classPlans.majorId, majorName: majors.name, studentCount: classPlans.studentCount, maxClassCapacity: classPlans.maxClassCapacity, classCountOverride: classPlans.classCountOverride })
           .from(classPlans).innerJoin(grades, and(eq(grades.id, classPlans.gradeId), eq(grades.schoolId, context.schoolId)))
           .leftJoin(majors, and(eq(majors.id, classPlans.majorId), eq(majors.schoolId, context.schoolId)))
@@ -78,6 +78,10 @@ export function createAcademicStructureRepository<TQueryResult extends PgQueryRe
           .from(schoolDays).where(and(eq(schoolDays.schoolId, context.schoolId), eq(schoolDays.academicYearId, activeAcademicYear.id))).orderBy(asc(schoolDays.sortOrder)),
         db.select({ id: periods.id, schoolDayId: periods.schoolDayId, position: periods.position, label: periods.label, startTime: periods.startTime, endTime: periods.endTime, breakAfterMinutes: periods.breakAfterMinutes, isActive: periods.isActive })
           .from(periods).where(and(eq(periods.schoolId, context.schoolId), eq(periods.academicYearId, activeAcademicYear.id))).orderBy(asc(periods.position)),
+        db.select({ schoolDayId: schoolDaySchedules.schoolDayId, mode: schoolDaySchedules.mode, startTime: schoolDaySchedules.startTime, endTime: schoolDaySchedules.endTime, periodCount: schoolDaySchedules.periodCount, defaultBreakMinutes: schoolDaySchedules.defaultBreakMinutes })
+          .from(schoolDaySchedules).where(and(eq(schoolDaySchedules.schoolId, context.schoolId), eq(schoolDaySchedules.academicYearId, activeAcademicYear.id))),
+        db.select({ schoolDayId: schoolBreaks.schoolDayId, afterPeriodPosition: schoolBreaks.afterPeriodPosition, kind: schoolBreaks.kind, startTime: schoolBreaks.startTime, endTime: schoolBreaks.endTime })
+          .from(schoolBreaks).where(and(eq(schoolBreaks.schoolId, context.schoolId), eq(schoolBreaks.academicYearId, activeAcademicYear.id))).orderBy(asc(schoolBreaks.afterPeriodPosition)),
       ]);
       return {
         academicYears: yearRows,
@@ -85,7 +89,23 @@ export function createAcademicStructureRepository<TQueryResult extends PgQueryRe
         grades: gradeRows,
         majors: majorRows,
         classPlans: planRows.map((plan) => ({ ...plan, classes: classRows.filter((group) => group.classPlanId === plan.id).map((group) => ({ id: group.id, name: group.name, studentCount: group.studentCount, maxCapacity: group.maxCapacity, isActive: group.isActive })) })),
-        schoolDays: dayRows.map((day) => ({ ...day, periods: periodRows.filter((period) => period.schoolDayId === day.id).map((period) => ({ id: period.id, position: period.position, label: period.label, startTime: period.startTime, endTime: period.endTime, breakAfterMinutes: period.breakAfterMinutes, isActive: period.isActive })) })),
+        schoolDays: dayRows.map((day) => {
+          const dayPeriods = periodRows.filter((period) => period.schoolDayId === day.id).map((period) => ({ id: period.id, position: period.position, label: period.label, startTime: period.startTime, endTime: period.endTime, breakAfterMinutes: period.breakAfterMinutes, isActive: period.isActive }));
+          const config = scheduleRows.find((item) => item.schoolDayId === day.id);
+          return {
+            ...day,
+            periods: dayPeriods,
+            schedule: config ? {
+              mode: config.mode,
+              startTime: config.startTime,
+              endTime: config.endTime,
+              periodCount: config.periodCount,
+              defaultBreakMinutes: config.defaultBreakMinutes,
+              periods: dayPeriods.filter((period) => period.isActive).map(({ position, label, startTime, endTime }) => ({ position, label, startTime, endTime })),
+              intermissions: breakRows.filter((item) => item.schoolDayId === day.id).map(({ afterPeriodPosition, kind, startTime, endTime }) => ({ afterPeriodPosition, kind, startTime, endTime })),
+            } : null,
+          };
+        }),
       };
     },
     async createAcademicYear(context, input) {
@@ -145,17 +165,32 @@ export function createAcademicStructureRepository<TQueryResult extends PgQueryRe
       return Boolean(updated);
     },
     async addSchoolDay(context, input) { await db.insert(schoolDays).values({ schoolId: context.schoolId, ...input }); },
-    async addPeriod(context, input) {
-      const [day] = await db.select({ id: schoolDays.id }).from(schoolDays).where(and(eq(schoolDays.id, input.schoolDayId), eq(schoolDays.academicYearId, input.academicYearId), eq(schoolDays.schoolId, context.schoolId))).limit(1);
-      if (!day) return false;
-      await db.insert(periods).values({ schoolId: context.schoolId, ...input });
-      return true;
-    },
     async updateSchoolDayStatus(context, schoolDayId, isActive) { const [row] = await db.update(schoolDays).set({ isActive }).where(and(eq(schoolDays.id, schoolDayId), eq(schoolDays.schoolId, context.schoolId))).returning({ id: schoolDays.id }); return Boolean(row); },
-    async updatePeriod(context, input) {
-      const { periodId, ...changes } = input;
-      const [row] = await db.update(periods).set(changes).where(and(eq(periods.id, periodId), eq(periods.schoolId, context.schoolId))).returning({ id: periods.id });
-      return Boolean(row);
+    async saveDaySchedule(context, academicYearId, schoolDayId, timeline) {
+      return db.transaction(async (tx) => {
+        const [ownedDay] = await tx.select({ id: schoolDays.id }).from(schoolDays).where(and(eq(schoolDays.id, schoolDayId), eq(schoolDays.academicYearId, academicYearId), eq(schoolDays.schoolId, context.schoolId))).limit(1);
+        if (!ownedDay) return false;
+        await tx.insert(schoolDaySchedules).values({ schoolId: context.schoolId, academicYearId, schoolDayId, mode: timeline.mode, startTime: timeline.startTime, endTime: timeline.endTime, periodCount: timeline.periodCount, defaultBreakMinutes: timeline.defaultBreakMinutes }).onConflictDoUpdate({
+          target: schoolDaySchedules.schoolDayId,
+          set: { mode: timeline.mode, startTime: timeline.startTime, endTime: timeline.endTime, periodCount: timeline.periodCount, defaultBreakMinutes: timeline.defaultBreakMinutes, updatedAt: new Date() },
+        });
+        const existingPeriods = await tx.select({ id: periods.id, position: periods.position }).from(periods).where(and(eq(periods.schoolDayId, schoolDayId), eq(periods.schoolId, context.schoolId)));
+        const existingByPosition = new Map(existingPeriods.map((period) => [period.position, period.id]));
+        await tx.update(periods).set({ isActive: false }).where(and(eq(periods.schoolDayId, schoolDayId), eq(periods.schoolId, context.schoolId)));
+        for (const period of timeline.periods) {
+          const intermission = timeline.intermissions.find((item) => item.afterPeriodPosition === period.position);
+          const breakAfterMinutes = intermission?.kind === "BREAK"
+            ? Number(intermission.endTime.slice(0, 2)) * 60 + Number(intermission.endTime.slice(3, 5)) - Number(intermission.startTime.slice(0, 2)) * 60 - Number(intermission.startTime.slice(3, 5))
+            : 0;
+          const changes = { label: period.label, startTime: period.startTime, endTime: period.endTime, breakAfterMinutes, isActive: true };
+          const existingId = existingByPosition.get(period.position);
+          if (existingId) await tx.update(periods).set(changes).where(and(eq(periods.id, existingId), eq(periods.schoolId, context.schoolId)));
+          else await tx.insert(periods).values({ schoolId: context.schoolId, academicYearId, schoolDayId, position: period.position, ...changes });
+        }
+        await tx.delete(schoolBreaks).where(and(eq(schoolBreaks.schoolDayId, schoolDayId), eq(schoolBreaks.schoolId, context.schoolId)));
+        if (timeline.intermissions.length) await tx.insert(schoolBreaks).values(timeline.intermissions.map((item) => ({ schoolId: context.schoolId, academicYearId, schoolDayId, ...item })));
+        return true;
+      });
     },
   };
 }

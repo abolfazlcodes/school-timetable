@@ -6,6 +6,8 @@ export const staffKind = pgEnum("staff_kind", ["TEACHER", "VICE_PRINCIPAL", "EDU
 export const availabilityStatus = pgEnum("availability_status", ["AVAILABLE", "UNAVAILABLE", "PREFERRED", "RESTRICTED"]);
 export const scheduleRunStatus = pgEnum("schedule_run_status", ["SUCCEEDED", "NO_SOLUTION", "PREFLIGHT_FAILED"]);
 export const scheduleVersionStatus = pgEnum("schedule_version_status", ["DRAFT", "PUBLISHED", "ARCHIVED"]);
+export const dayScheduleMode = pgEnum("day_schedule_mode", ["AUTO", "MANUAL"]);
+export const intermissionKind = pgEnum("intermission_kind", ["BREAK", "TRANSITION"]);
 
 export const users = pgTable("users", {
   id: uuid("id").primaryKey(),
@@ -155,6 +157,30 @@ export const periods = pgTable("periods", {
   breakAfterMinutes: integer("break_after_minutes").notNull().default(0),
   isActive: boolean("is_active").notNull().default(true),
 }, (table) => [uniqueIndex("periods_day_position_unique").on(table.schoolDayId, table.position)]);
+
+export const schoolDaySchedules = pgTable("school_day_schedules", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  schoolId: uuid("school_id").notNull().references(() => schools.id, { onDelete: "cascade" }),
+  academicYearId: uuid("academic_year_id").notNull().references(() => academicYears.id, { onDelete: "cascade" }),
+  schoolDayId: uuid("school_day_id").notNull().references(() => schoolDays.id, { onDelete: "cascade" }),
+  mode: dayScheduleMode("mode").notNull(),
+  startTime: time("start_time", { withTimezone: false }).notNull(),
+  endTime: time("end_time", { withTimezone: false }).notNull(),
+  periodCount: integer("period_count").notNull(),
+  defaultBreakMinutes: integer("default_break_minutes").notNull().default(0),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [uniqueIndex("school_day_schedules_day_unique").on(table.schoolDayId), index("school_day_schedules_school_year_idx").on(table.schoolId, table.academicYearId)]);
+
+export const schoolBreaks = pgTable("school_breaks", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  schoolId: uuid("school_id").notNull().references(() => schools.id, { onDelete: "cascade" }),
+  academicYearId: uuid("academic_year_id").notNull().references(() => academicYears.id, { onDelete: "cascade" }),
+  schoolDayId: uuid("school_day_id").notNull().references(() => schoolDays.id, { onDelete: "cascade" }),
+  afterPeriodPosition: integer("after_period_position").notNull(),
+  kind: intermissionKind("kind").notNull(),
+  startTime: time("start_time", { withTimezone: false }).notNull(),
+  endTime: time("end_time", { withTimezone: false }).notNull(),
+}, (table) => [uniqueIndex("school_breaks_day_position_unique").on(table.schoolDayId, table.afterPeriodPosition), index("school_breaks_school_year_idx").on(table.schoolId, table.academicYearId)]);
 
 export const teachers = pgTable("teachers", {
   id: uuid("id").primaryKey().defaultRandom(),

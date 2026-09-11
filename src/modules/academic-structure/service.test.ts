@@ -1,13 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import type { TenantContext } from "@/modules/tenancy/types";
 import type { AcademicStructureRepository } from "./repository";
-import { addPeriod, saveClassPlan } from "./service";
+import { saveClassPlan, saveSchoolDaySchedule } from "./service";
+import { calculateAutomaticTimeline } from "./school-day-timeline";
 
 const context: TenantContext = { sessionId: "s", userId: "u", userName: "مدیر", schoolId: "school-a", schoolName: "الف", schoolCode: null, role: "ADMIN" };
 const ids = { year: "30000000-0000-4000-8000-000000000001", grade: "31000000-0000-4000-8000-000000000001", major: "32000000-0000-4000-8000-000000000001", day: "36000000-0000-4000-8000-000000000001" };
 
 function repository(overrides: Partial<AcademicStructureRepository> = {}) {
-  return { resolveClassScope: vi.fn(async () => ({ yearTitle: "۱۴۰۵", gradeName: "دهم", majorName: "تجربی" })), saveClassPlan: vi.fn(), getWorkspace: vi.fn(async () => ({ academicYears: [], activeAcademicYear: { id: ids.year, title: "۱۴۰۵", startYear: 1405, endYear: 1406, isActive: true }, grades: [], majors: [], classPlans: [], schoolDays: [{ id: ids.day, dayOfWeek: 0, label: "شنبه", sortOrder: 0, isActive: true, periods: [{ id: "p1", position: 1, label: "زنگ ۱", startTime: "07:30:00", endTime: "08:15:00", breakAfterMinutes: 5, isActive: true }] }] })), addPeriod: vi.fn(async () => true), ...overrides } as unknown as AcademicStructureRepository;
+  return { resolveClassScope: vi.fn(async () => ({ yearTitle: "۱۴۰۵", gradeName: "دهم", majorName: "تجربی" })), saveClassPlan: vi.fn(), saveDaySchedule: vi.fn(async () => true), ...overrides } as unknown as AcademicStructureRepository;
 }
 
 describe("مدیریت ساختار مدرسه", () => {
@@ -25,20 +26,23 @@ describe("مدیریت ساختار مدرسه", () => {
     expect(repo.saveClassPlan).not.toHaveBeenCalled();
   });
 
-  it("تداخل زمانی زنگ‌های یک روز را رد می‌کند", async () => {
+  it("timeline معتبر را یکجا ذخیره می‌کند", async () => {
     const repo = repository();
-    const result = await addPeriod(context, { academicYearId: ids.year, schoolDayId: ids.day, position: 2, label: "زنگ ۲", startTime: "08:00", endTime: "08:45", breakAfterMinutes: 5 }, repo);
-    expect(result).toMatchObject({ status: "error" });
-    expect(repo.addPeriod).not.toHaveBeenCalled();
+    const timeline = calculateAutomaticTimeline({ startTime: "08:00", endTime: "13:20", periodCount: 4, defaultBreakMinutes: 10 });
+    const result = await saveSchoolDaySchedule(context, { ...timeline, academicYearId: ids.year, schoolDayId: ids.day }, repo);
+    expect(result.status).toBe("success");
+    expect(repo.saveDaySchedule).toHaveBeenCalledWith(context, ids.year, ids.day, expect.objectContaining({ periodCount: 4 }));
   });
 
-  it("زمان نامعتبر و عدد منفی فارسی را پیش از repository رد می‌کند", async () => {
+  it("timeline هم‌پوشان را پیش از repository رد می‌کند", async () => {
     const repo = repository();
-    const invalidTime = await addPeriod(context, { academicYearId: ids.year, schoolDayId: ids.day, position: 2, label: "زنگ ۲", startTime: "25:00", endTime: "26:00", breakAfterMinutes: 5 }, repo);
+    const timeline = calculateAutomaticTimeline({ startTime: "08:00", endTime: "12:30", periodCount: 4, defaultBreakMinutes: 10 });
+    timeline.periods[1].startTime = "08:30";
+    const invalidTime = await saveSchoolDaySchedule(context, { ...timeline, academicYearId: ids.year, schoolDayId: ids.day }, repo);
     const invalidCount = await saveClassPlan(context, { academicYearId: ids.year, gradeId: ids.grade, majorId: ids.major, studentCount: "−۷۳", maxClassCapacity: "۲۸", classCountOverride: "" }, repo);
     expect(invalidTime.status).toBe("error");
     expect(invalidCount.status).toBe("error");
-    expect(repo.addPeriod).not.toHaveBeenCalled();
+    expect(repo.saveDaySchedule).not.toHaveBeenCalled();
     expect(repo.saveClassPlan).not.toHaveBeenCalled();
   });
 });

@@ -6,7 +6,7 @@ import { requireTenantContext } from "@/modules/auth/dal";
 import type { ActionState } from "@/modules/planning/action-state";
 import { AuthorizationError } from "@/modules/tenancy/types";
 import { createAcademicStructureRepository } from "./repository";
-import { activateAcademicYear, addGrade, addMajor, addPeriod, addSchoolDay, createAcademicYear, editClassGroup, editPeriod, saveClassPlan, setGradeStatus, setMajorStatus, setSchoolDayStatus } from "./service";
+import { activateAcademicYear, addGrade, addMajor, addSchoolDay, createAcademicYear, editClassGroup, saveClassPlan, saveSchoolDaySchedule, setGradeStatus, setMajorStatus, setSchoolDayStatus } from "./service";
 
 type Operation = (context: Awaited<ReturnType<typeof requireTenantContext>>, input: unknown, repository: ReturnType<typeof createAcademicStructureRepository>) => Promise<ActionState>;
 
@@ -32,6 +32,12 @@ export async function setMajorStatusAction(_state: ActionState, formData: FormDa
 export async function saveClassPlanAction(_state: ActionState, formData: FormData) { return run(saveClassPlan, { academicYearId: formData.get("academicYearId"), gradeId: formData.get("gradeId"), majorId: formData.get("majorId"), studentCount: formData.get("studentCount"), maxClassCapacity: formData.get("maxClassCapacity"), classCountOverride: formData.get("classCountOverride") }); }
 export async function editClassGroupAction(_state: ActionState, formData: FormData) { return run(editClassGroup, { classGroupId: formData.get("classGroupId"), name: formData.get("name"), isActive: formData.get("isActive") === "on" }); }
 export async function addSchoolDayAction(_state: ActionState, formData: FormData) { return run(addSchoolDay, { academicYearId: formData.get("academicYearId"), dayOfWeek: formData.get("dayOfWeek"), label: formData.get("label"), sortOrder: formData.get("sortOrder") }); }
-export async function addPeriodAction(_state: ActionState, formData: FormData) { return run(addPeriod, { academicYearId: formData.get("academicYearId"), schoolDayId: formData.get("schoolDayId"), position: formData.get("position"), label: formData.get("label"), startTime: formData.get("startTime"), endTime: formData.get("endTime"), breakAfterMinutes: formData.get("breakAfterMinutes") }); }
 export async function setSchoolDayStatusAction(_state: ActionState, formData: FormData) { return run(setSchoolDayStatus, { id: formData.get("id"), isActive: formData.get("isActive") === "true" }); }
-export async function editPeriodAction(_state: ActionState, formData: FormData) { return run(editPeriod, { periodId: formData.get("periodId"), label: formData.get("label"), startTime: formData.get("startTime"), endTime: formData.get("endTime"), breakAfterMinutes: formData.get("breakAfterMinutes"), isActive: formData.get("isActive") === "on" }); }
+export async function saveSchoolDayScheduleAction(_state: ActionState, formData: FormData) {
+  try {
+    const timeline = JSON.parse(String(formData.get("timeline") ?? "")) as Record<string, unknown>;
+    return run(saveSchoolDaySchedule, { ...timeline, academicYearId: formData.get("academicYearId"), schoolDayId: formData.get("schoolDayId") });
+  } catch {
+    return { status: "error", message: "ساختار برنامه زنگ‌ها قابل خواندن نیست." } satisfies ActionState;
+  }
+}

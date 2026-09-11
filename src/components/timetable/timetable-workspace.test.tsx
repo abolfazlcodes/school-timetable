@@ -56,6 +56,13 @@ describe("فضای کاری برنامه هفتگی", () => {
     expect(screen.getByRole("table")).toHaveTextContent("دبیر");
   });
 
+  it("ساعت دقیق زنگ را داخل grid نمایش می‌دهد", () => {
+    const data = makeData();
+    data.problem.periods[0] = { ...data.problem.periods[0], startTime: "08:00", endTime: "09:15" };
+    render(<TimetableWorkspace initialData={data} />);
+    expect(screen.getAllByText("08:00–09:15").length).toBeGreaterThan(0);
+  });
+
   it("با کلیک روی جلسه، drawer و عملیات ویرایش/تعویض/حذف را همان‌جا باز می‌کند", () => {
     render(<TimetableWorkspace initialData={makeData()} />);
     fireEvent.click(screen.getAllByRole("button", { name: "ویرایش ریاضی" })[0]);

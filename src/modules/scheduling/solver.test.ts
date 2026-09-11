@@ -17,6 +17,21 @@ describe("موتور قطعی CSP", () => {
     expect(first.candidates.map((item) => item.score)).toEqual(second.candidates.map((item) => item.score));
   });
 
+  it("با زمان واقعی و مدت‌های نابرابر زنگ‌ها همان قیود slot را حفظ می‌کند", () => {
+    const original = makeProblem();
+    const customTimes = makeProblem({
+      periods: makeProblem().periods.map((period) => {
+        const times = period.position === 1 ? ["08:00", "09:15"] : period.position === 2 ? ["09:25", "10:45"] : ["11:00", "12:25"];
+        return { ...period, startTime: times[0], endTime: times[1] };
+      }),
+    });
+    const first = solveSchedule(original, { maxCandidates: 1, nodeBudget: 20_000, timeBudgetMs: 1_000 });
+    const second = solveSchedule(customTimes, { maxCandidates: 1, nodeBudget: 20_000, timeBudgetMs: 1_000 });
+    expect(second.status).toBe("SUCCEEDED");
+    expect(second.candidates[0].signature).toBe(first.candidates[0].signature);
+    expect(validateSchedule(customTimes, second.candidates[0].assignments).filter((issue) => issue.severity === "ERROR")).toEqual([]);
+  });
+
   it("availability و تداخل دبیر و کلاس را validator مستقل رد می‌کند", () => {
     const problem = makeProblem(); const assignments = [
       { sessionId: "r1:1", curriculumId: "r1", classId: "c1", subjectId: "math", teacherId: "t1", dayId: "sat", startPosition: 1, periodIds: ["sa-1"] },

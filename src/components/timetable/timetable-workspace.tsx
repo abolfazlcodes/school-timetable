@@ -231,7 +231,7 @@ function TimetableGrid({
   return (
     <div className="timetable-grid-wrap">
       <table className="timetable-grid" style={{ minWidth: Math.max(760, positions.length * 145 + 100) }}>
-        <thead><tr><th>روز</th>{positions.map((position) => { const example = data.problem.periods.find((period) => period.position === position); return <th key={position}><strong>زنگ {position.toLocaleString("fa-IR")}</strong><small>{example ? `${example.startTime.slice(0, 5)}–${example.endTime.slice(0, 5)}` : ""}</small></th>; })}</tr></thead>
+        <thead><tr><th>روز</th>{positions.map((position) => { const times = [...new Set(data.problem.periods.filter((period) => period.position === position).map((period) => `${period.startTime.slice(0, 5)}–${period.endTime.slice(0, 5)}`))]; return <th key={position}><strong>زنگ {position.toLocaleString("fa-IR")}</strong><small>{times.length === 1 ? times[0] : "ساعت متغیر"}</small></th>; })}</tr></thead>
         <tbody>{days.map((day) => {
           const cells: React.ReactNode[] = [];
           for (const position of positions) {
@@ -253,14 +253,14 @@ function TimetableGrid({
                   <button type="button" className="lesson-cell" onClick={() => editable && onSelect({ kind: "edit", sessionId: assignment.sessionId })} disabled={!editable} aria-label={`ویرایش ${session?.subjectName ?? "جلسه"}`}>
                     <strong>{session?.subjectName}</strong>
                     <span>{mode === "classes" ? teacher?.name : session?.className}</span>
-                    <small>{assignment.periodIds.length.toLocaleString("fa-IR")} زنگ{hasError ? " · خطا" : hasWarning ? " · هشدار" : ""}</small>
+                    <small><bdi>{period.startTime.slice(0, 5)}–{data.problem.periods.find((item) => item.id === assignment.periodIds.at(-1))?.endTime.slice(0, 5)}</bdi>{assignment.periodIds.length > 1 ? ` · ${assignment.periodIds.length.toLocaleString("fa-IR")} زنگ` : ""}{hasError ? " · خطا" : hasWarning ? " · هشدار" : ""}</small>
                   </button>
                 </td>,
               );
             } else {
               cells.push(
                 <td className="is-empty" key={position}>
-                  {editable ? <button type="button" onClick={() => onSelect({ kind: "add", dayId: day.dayId, startPosition: position })} aria-label={`افزودن جلسه در ${day.dayLabel} زنگ ${position.toLocaleString("fa-IR")}`}><Plus size={14} /><span>افزودن</span></button> : <span>—</span>}
+                  {editable ? <button type="button" onClick={() => onSelect({ kind: "add", dayId: day.dayId, startPosition: position })} aria-label={`افزودن جلسه در ${day.dayLabel} زنگ ${position.toLocaleString("fa-IR")}`}><small><bdi>{period.startTime.slice(0, 5)}–{period.endTime.slice(0, 5)}</bdi></small><span><Plus size={14} /> افزودن</span></button> : <span className="empty-period-time"><bdi>{period.startTime.slice(0, 5)}–{period.endTime.slice(0, 5)}</bdi></span>}
                 </td>,
               );
             }

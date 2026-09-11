@@ -1,0 +1,49 @@
+{
+  "name": "school-schedule-panel",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "benchmark:scheduling": "vitest run src/modules/scheduling/solver.benchmark.test.ts --reporter=verbose",
+    "db:migrate": "node --experimental-strip-types scripts/migrate.ts",
+    "db:seed": "node --experimental-strip-types scripts/seed.ts",
+    "db:setup": "npm run db:migrate && npm run db:seed"
+  },
+  "dependencies": {
+    "@fontsource-variable/vazirmatn": "latest",
+    "@types/pdfkit": "^0.17.6",
+    "clsx": "latest",
+    "drizzle-orm": "^0.45.2",
+    "lucide-react": "latest",
+    "next": "latest",
+    "pdfkit": "^0.20.2",
+    "postgres": "^3.4.9",
+    "react": "latest",
+    "react-dom": "latest",
+    "vazirmatn": "^33.0.3",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.4.3",
+    "@eslint/eslintrc": "latest",
+    "@playwright/test": "latest",
+    "@testing-library/jest-dom": "latest",
+    "@testing-library/react": "latest",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "eslint": "latest",
+    "eslint-config-next": "latest",
+    "jsdom": "latest",
+    "typescript": "^5.9.3",
+    "vitest": "latest"
+  }
+}

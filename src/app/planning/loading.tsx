@@ -1,0 +1,1 @@
+export default function PlanningLoading() { return <div className="loading-state" aria-label="در حال دریافت اطلاعات برنامه‌ریزی"><span className="skeleton" /><span className="skeleton" /><span className="skeleton" /><span className="skeleton" /></div>; }

@@ -1,0 +1,70 @@
+# مدل داده فاز یک
+
+## هویت و tenancy
+
+- `users`: هویت سراسری، ایمیل و password hash
+- `schools`: مشخصات و تنظیمات یک مدرسه
+- `school_memberships`: ارتباط کاربر/مدرسه با نقش ADMIN یا VICE_PRINCIPAL
+- `sessions`: digest نشست، کاربر، مدرسه فعال و انقضا
+
+این چهار جدول در migration `0000_auth_and_schools.sql` پیاده شده‌اند. foreign key مرکب session تضمین می‌کند `(user_id, active_school_id)` حتماً یک membership واقعی باشد. ایمیل normalize‌شده یکتا، token digest یکتا و session قابل revoke است. جداول ورودی برنامه‌ریزی در `0001_planning_inputs.sql` و کنترل‌های مرکب/الگوی جلسه در `0002_planning_invariants.sql` پیاده شده‌اند. Migrationهای `0006` و `0007` نیز عضویت actorهای برنامه، سازگاری زنجیره snapshot و invariantهای زمان/کلاس را در خود PostgreSQL enforce می‌کنند.
+
+## ساختار آموزشی
+
+- `academic_years`: عنوان، بازه، وضعیت جاری؛ تاریخچه حذف نمی‌شود
+- `grades`: پایه در یک مدرسه
+- `majors`: رشته/شاخه در یک مدرسه
+- `class_plans`: ورودی تجمیعی تعداد دانش‌آموز، ظرفیت، پیشنهاد و override برای یک پایه/رشته
+- `class_groups`: کلاس در یک سال، پایه و رشته اختیاری، ظرفیت و تعداد دانش‌آموز
+- `subjects`: تعریف قابل استفاده مجدد درس در مدرسه
+- `curriculum_items`: نیاز درس برای پایه/رشته/سال شامل ساعات، تعداد جلسات و pattern
+- `LessonRequirement` (مدل دامنه): نیاز واقعی یک درس برای یک کلاس
+- `RequiredSession` (مدل دامنه): جلسه مشتق‌شده از requirement که هنوز زمان‌بندی نشده است
+
+این دو مفهوم از `ScheduleAssignment` جدا هستند: requirement/session می‌گویند «چه چیزی باید تدریس شود» و assignment می‌گوید «در کدام روز و زنگ و با کدام دبیر قرار گرفته است». در فاز یک requirementها به‌شکل قطعی از curriculum و کلاس‌ها ساخته می‌شوند و assignmentها داخل snapshotهای candidate/workspace/version ذخیره می‌شوند.
+
+## منابع انسانی
+
+- `teachers`: اطلاعات پایدار شخص؛ `staff_kind` نقش آموزشی/اجرایی را بدون استثنای hardcoded ثبت می‌کند
+- `teacher_subjects`: توانایی تدریس چند درس
+- `teacher_year_profiles`: min/required/max workload و overtime برای یک سال
+- `teacher_availability`: وضعیت AVAILABLE/UNAVAILABLE/PREFERRED/RESTRICTED برای day/period یک سال
+
+`staff_kind` شامل دبیر، معاون و سایر کارکنان دارای مسئولیت تدریس است؛ solver بعدی همه را به‌عنوان یک منبع زمان‌بندی‌شونده می‌بیند و استثنای hardcoded ندارد. محدودیت روزانه و حداکثر زنگ متوالی در profile سالانه ذخیره می‌شود.
+
+## ساختار زمان
+
+- `school_days`: روز کاری و ترتیب در یک سال
+- `periods`: بازه شروع/پایان و وضعیت برای هر روز؛ برنامه متفاوت روزانه مجاز است
+- break با `break_after_minutes` روی period نگه‌داری می‌شود و slot قابل تخصیص نیست.
+
+## برنامه
+
+- `schedule_runs`: ورودی، fingerprint، زمان، نتیجه preflight و آمار اجرا
+- `schedule_candidates`: rank، امتیاز، penalty breakdown و placementهای معتبر هر اجرا
+- `schedule_workspaces`: snapshot کاری قابل ویرایش از candidate، نتیجه آخرین validation و revision برای جلوگیری از overwrite هم‌زمان
+- `schedule_versions`: snapshot تغییرناپذیر assignmentها و validation، شماره، DRAFT/PUBLISHED/ARCHIVED، منبع workspace/run/candidate، actor و زمان انتشار
+
+در Stage 4، `schedule_runs` و `schedule_candidates` در migration `0003_schedule_runs.sql` ایجاد شدند. Stage 5 در migration `0004_schedule_workspaces.sql` یک snapshot کاری tenant-scoped اضافه کرد؛ assignmentها و issueهای validation آن به‌صورت یک واحد و با `revision` اتمیک ذخیره می‌شوند. Stage 6 در migration `0005_schedule_versions.sql` snapshotهای immutable نسخه را اضافه کرد. هر نسخه به workspace، run و candidate منبع متصل است و یک نسخه منتشرشده در هر مدرسه/سال مجاز است. fork نسخه تاریخی workspace جدیدی با `source_version_id` می‌سازد و نسخه مبدا را تغییر نمی‌دهد.
+
+## invariantهای اصلی
+
+- تمام foreign keyهای سالانه باید متعلق به همان `school_id` باشند؛ service آن را پیش از write و constraintهای مرکب DB آن را در موارد حساس enforce می‌کنند.
+- فقط یک سال جاری در هر مدرسه وجود دارد (partial unique index).
+- فقط یک نسخه منتشرشده فعال برای سال/مدرسه وجود دارد.
+- سازنده run/workspace/version و منتشرکننده نسخه باید عضو همان مدرسه باشند.
+- workspace و version فقط می‌توانند به run/candidate/version مبدا در همان مدرسه و سال متصل شوند.
+- JSON مسئله‌ها array و summary/penalty breakdown object است؛ نسخه PUBLISHED نمی‌تواند issue با شدت `ERROR` داشته باشد.
+- امتیاز ذخیره‌شده نسخه در بازه صفر تا ۱۰٬۰۰۰ است.
+- ساعت و تعداد جلسه مثبت است و مجموع pattern دقیقاً برابر ساعات هفتگی است.
+- `min_workload <= required_workload <= max_workload`; overtime منفی نیست.
+- بازه period معتبر است و periodهای یک روز overlap ندارند.
+- پایه، رشته، سال و مدرسه هر class group باید دقیقاً با class plan آن یکسان باشد.
+- session چند-periodی فقط روی periodهای متوالی همان روز قرار می‌گیرد.
+- snapshot برنامه منتشرشده مستقیم ویرایش نمی‌شود.
+
+## پیشنهاد تعداد کلاس
+
+`ceil(studentCount / maxClassCapacity)` پیشنهاد می‌شود. مقدار override جداگانه ذخیره می‌شود تا هم پیشنهاد قابل بازتولید باشد و هم تصمیم مدیر از بین نرود. مقدارهای صفر/منفی یا ظرفیت کمتر از یک رد می‌شوند.
+
+هنگام ذخیره plan، دانش‌آموزان تا حد ممکن یکنواخت بین کلاس‌ها توزیع می‌شوند. overrideای که ظرفیت کافی ایجاد نکند پیش از write رد می‌شود. کاهش تعداد، کلاس‌های اضافه را غیرفعال می‌کند تا نام و سابقه آن‌ها حذف نشود.

@@ -3,10 +3,14 @@ import { loadEnvFile } from "node:process";
 import postgres from "postgres";
 import { hashPassword } from "../src/modules/auth/password.ts";
 import { defaultPattern, referenceClasses, referenceCurriculum, referenceId, referenceSubjectNames, referenceTeachers } from "./reference-school-data.ts";
+import { resolveSeedIdentity, resolveSeedProfile } from "./seed-profile.ts";
 
 if (existsSync(".env.local")) loadEnvFile(".env.local");
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) throw new Error("DATABASE_URL تنظیم نشده است.");
+const seedProfile = resolveSeedProfile(process.env.SEED_PROFILE);
+const isDeliverySeed = seedProfile === "shahid-beheshti";
+const seedIdentity = resolveSeedIdentity(seedProfile);
 
 const ids = {
   admin: "10000000-0000-4000-8000-000000000001",
@@ -25,27 +29,50 @@ const ids = {
   teacherB: "35000000-0000-4000-8000-000000000002",
 };
 
-const passwordHash = await hashPassword("Demo123!");
+const [adminPasswordHash, vicePrincipalPasswordHash] = await Promise.all([
+  hashPassword(seedIdentity.admin.password),
+  hashPassword(seedIdentity.vicePrincipal.password),
+]);
 const sql = postgres(connectionString, { max: 1 });
 
 try {
   await sql.begin(async (transaction) => {
-    await transaction`INSERT INTO users (id, email, full_name, password_hash)
-      VALUES (${ids.admin}, 'admin@madreseyar.ir', 'مریم نادری', ${passwordHash}),
-             (${ids.vicePrincipal}, 'moaven@madreseyar.ir', 'رضا کریمی', ${passwordHash})
-      ON CONFLICT (id) DO UPDATE SET full_name = excluded.full_name, password_hash = excluded.password_hash, is_active = true, updated_at = now()`;
-    await transaction`INSERT INTO schools (id, name, code, province, city, phone)
-      VALUES (${ids.schoolA}, 'دبیرستان فرزانگان', '29103', 'تهران', 'تهران', '02144000000'),
-             (${ids.schoolB}, 'دبیرستان دانا', '47218', 'البرز', 'کرج', '02632000000'),
-             (${ids.schoolC}, 'دبیرستان شهید بهشتی', '140506', 'مرکزی', 'خنداب', null)
-      ON CONFLICT (id) DO UPDATE SET name = excluded.name, code = excluded.code, is_active = true, updated_at = now()`;
-    await transaction`INSERT INTO school_memberships (user_id, school_id, role)
-      VALUES (${ids.admin}, ${ids.schoolA}, 'ADMIN'),
-             (${ids.admin}, ${ids.schoolB}, 'ADMIN'),
-             (${ids.admin}, ${ids.schoolC}, 'ADMIN'),
-             (${ids.vicePrincipal}, ${ids.schoolA}, 'VICE_PRINCIPAL')
-      ON CONFLICT (user_id, school_id) DO UPDATE SET role = excluded.role`;
+    if (isDeliverySeed) {
+      const [unexpectedSchool] = await transaction`SELECT name FROM schools WHERE id <> ${ids.schoolC} LIMIT 1`;
+      const [unexpectedUser] = await transaction`SELECT email FROM users WHERE id <> ${ids.admin} AND id <> ${ids.vicePrincipal} LIMIT 1`;
+      if (unexpectedSchool || unexpectedUser) {
+        throw new Error("seed تحویلی فقط باید روی پایگاه داده تازه اجرا شود؛ مدرسه یا کاربر دیگری در پایگاه داده وجود دارد.");
+      }
+    }
 
+    await transaction`INSERT INTO users (id, email, full_name, password_hash)
+      VALUES (${ids.admin}, ${seedIdentity.admin.email}, ${seedIdentity.admin.fullName}, ${adminPasswordHash}),
+             (${ids.vicePrincipal}, ${seedIdentity.vicePrincipal.email}, ${seedIdentity.vicePrincipal.fullName}, ${vicePrincipalPasswordHash})
+      ON CONFLICT (id) DO UPDATE SET email = excluded.email, full_name = excluded.full_name, password_hash = excluded.password_hash, is_active = true, updated_at = now()`;
+
+    if (isDeliverySeed) {
+      await transaction`INSERT INTO schools (id, name, code, province, city, phone)
+        VALUES (${ids.schoolC}, 'دبیرستان شهید بهشتی', '140506', 'مرکزی', 'خنداب', null)
+        ON CONFLICT (id) DO UPDATE SET name = excluded.name, code = excluded.code, is_active = true, updated_at = now()`;
+      await transaction`INSERT INTO school_memberships (user_id, school_id, role)
+        VALUES (${ids.admin}, ${ids.schoolC}, 'ADMIN'),
+               (${ids.vicePrincipal}, ${ids.schoolC}, 'VICE_PRINCIPAL')
+        ON CONFLICT (user_id, school_id) DO UPDATE SET role = excluded.role`;
+    } else {
+      await transaction`INSERT INTO schools (id, name, code, province, city, phone)
+        VALUES (${ids.schoolA}, 'دبیرستان فرزانگان', '29103', 'تهران', 'تهران', '02144000000'),
+               (${ids.schoolB}, 'دبیرستان دانا', '47218', 'البرز', 'کرج', '02632000000'),
+               (${ids.schoolC}, 'دبیرستان شهید بهشتی', '140506', 'مرکزی', 'خنداب', null)
+        ON CONFLICT (id) DO UPDATE SET name = excluded.name, code = excluded.code, is_active = true, updated_at = now()`;
+      await transaction`INSERT INTO school_memberships (user_id, school_id, role)
+        VALUES (${ids.admin}, ${ids.schoolA}, 'ADMIN'),
+               (${ids.admin}, ${ids.schoolB}, 'ADMIN'),
+               (${ids.admin}, ${ids.schoolC}, 'ADMIN'),
+               (${ids.vicePrincipal}, ${ids.schoolA}, 'VICE_PRINCIPAL')
+        ON CONFLICT (user_id, school_id) DO UPDATE SET role = excluded.role`;
+    }
+
+    if (!isDeliverySeed) {
     await transaction`INSERT INTO academic_years (id, school_id, title, start_year, end_year, is_active)
       VALUES (${ids.year}, ${ids.schoolA}, '۱۴۰۵–۱۴۰۶', 1405, 1406, true)
       ON CONFLICT (id) DO UPDATE SET title = excluded.title, is_active = true`;
@@ -123,12 +150,15 @@ try {
       FROM teachers teacher CROSS JOIN periods period INNER JOIN school_days day ON day.id = period.school_day_id
       WHERE teacher.id IN (${ids.teacherA}, ${ids.teacherB}) AND period.school_id = ${ids.schoolA} AND period.academic_year_id = ${ids.year} AND period.is_active
       ON CONFLICT (academic_year_id, teacher_id, period_id) DO UPDATE SET status = excluded.status`;
+    }
 
-    const referenceTargets = [
-      { schoolId: ids.schoolA, yearId: ids.year, includeStructure: false },
-      { schoolId: ids.schoolB, yearId: referenceId(ids.schoolB, "year:1405"), includeStructure: true },
-      { schoolId: ids.schoolC, yearId: referenceId(ids.schoolC, "year:1405"), includeStructure: true },
-    ];
+    const referenceTargets = isDeliverySeed
+      ? [{ schoolId: ids.schoolC, yearId: referenceId(ids.schoolC, "year:1405"), includeStructure: true }]
+      : [
+          { schoolId: ids.schoolA, yearId: ids.year, includeStructure: false },
+          { schoolId: ids.schoolB, yearId: referenceId(ids.schoolB, "year:1405"), includeStructure: true },
+          { schoolId: ids.schoolC, yearId: referenceId(ids.schoolC, "year:1405"), includeStructure: true },
+        ];
     const gradeLabels = { "10": "پایه دهم", "11": "پایه یازدهم", "12": "پایه دوازدهم" } as const;
     const majorLabels = { MATH: "ریاضی", SCIENCE: "علوم تجربی", HUMANITIES: "ادبیات و علوم انسانی" } as const;
 
@@ -250,11 +280,30 @@ try {
           WHERE period.school_id = ${target.schoolId} AND period.academic_year_id = ${target.yearId} AND period.is_active
           ON CONFLICT (academic_year_id, teacher_id, period_id) DO UPDATE SET status = excluded.status`;
       }
+
+      if (isDeliverySeed && target.schoolId === ids.schoolC) {
+        const hamidTeacherId = referenceId(ids.schoolC, "teacher:hamid-bagheri");
+        const persianSubjectId = subjectIds.get("فارسی");
+        if (!persianSubjectId) throw new Error("درس فارسی در داده مرجع پیدا نشد.");
+        await transaction`INSERT INTO teachers (id, school_id, first_name, last_name, personnel_code, employment_type, staff_kind, notes)
+          VALUES (${hamidTeacherId}, ${ids.schoolC}, 'حمید', 'باقری', 'PENDING-HB', 'FULL_TIME', 'VICE_PRINCIPAL', 'معاون و دبیر فارسی؛ کد پرسنلی، موظفی، ساعات تخصیص و حضور باید توسط مدرسه تکمیل شود.')
+          ON CONFLICT (id) DO UPDATE SET first_name = excluded.first_name, last_name = excluded.last_name, staff_kind = excluded.staff_kind, notes = excluded.notes, is_active = true, updated_at = now()`;
+        await transaction`INSERT INTO teacher_subject_assignments (school_id, academic_year_id, teacher_id, subject_id, assigned_weekly_hours)
+          VALUES (${ids.schoolC}, ${target.yearId}, ${hamidTeacherId}, ${persianSubjectId}, 0)
+          ON CONFLICT (academic_year_id, teacher_id, subject_id) DO NOTHING`;
+      }
     }
   });
-  console.log("Demo data seeded.");
-  console.log("admin@madreseyar.ir / Demo123!");
-  console.log("moaven@madreseyar.ir / Demo123!");
+  if (isDeliverySeed) {
+    console.log("Delivery data seeded: دبیرستان شهید بهشتی و دو حساب مجاز.");
+    console.log(`Admin: ${seedIdentity.admin.email}`);
+    console.log(`Vice principal: ${seedIdentity.vicePrincipal.email} / حمید باقری`);
+    console.log("Passwords were read from environment variables and are not printed.");
+  } else {
+    console.log("Demo data seeded.");
+    console.log(`${seedIdentity.admin.email} / ${seedIdentity.admin.password}`);
+    console.log(`${seedIdentity.vicePrincipal.email} / ${seedIdentity.vicePrincipal.password}`);
+  }
 } finally {
   await sql.end();
 }

@@ -15,7 +15,9 @@
     "benchmark:scheduling": "vitest run src/modules/scheduling/solver.benchmark.test.ts --reporter=verbose",
     "db:migrate": "node --experimental-strip-types scripts/migrate.ts",
     "db:seed": "node --experimental-strip-types scripts/seed.ts",
-    "db:setup": "npm run db:migrate && npm run db:seed"
+    "db:seed:delivery": "SEED_PROFILE=shahid-beheshti node --experimental-strip-types scripts/seed.ts",
+    "db:setup": "npm run db:migrate && npm run db:seed",
+    "db:setup:delivery": "npm run db:migrate && npm run db:seed:delivery"
   },
   "dependencies": {
     "@fontsource-variable/vazirmatn": "latest",

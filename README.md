@@ -41,3 +41,13 @@ npm run build
 ```
 
 `npm run db:setup` تکرارپذیر است و می‌توان آن را برای اعمال migrationهای جدید و به‌روزرسانی idempotent داده نمایشی دوباره اجرا کرد. جزئیات معماری در پوشه `docs` و وضعیت پیاده‌سازی در `docs/PHASE-1-CHECKLIST.md` قرار دارد.
+
+## نسخه تحویلی شهید بهشتی
+
+برای ساخت نسخه واقعی آزمایشی از seed عادی استفاده نکنید. پروفایل تحویلی فقط «دبیرستان شهید بهشتی»، حساب مدیر، حساب معاون حمید باقری و داده مرجع فعلی را روی یک PostgreSQL تازه ایجاد می‌کند:
+
+```bash
+npm run db:setup:delivery
+```
+
+این فرمان به متغیرهای امن `SEED_ADMIN_EMAIL`، `SEED_ADMIN_PASSWORD`، `SEED_VICE_PRINCIPAL_EMAIL` و `SEED_VICE_PRINCIPAL_PASSWORD` نیاز دارد و نباید پس از شروع ویرایش داده‌های واقعی دوباره اجرا شود. جزئیات در [راهنمای استقرار](docs/DEPLOYMENT.md) و متن آماده تحویل در [راهنمای معاون](docs/VICE-PRINCIPAL-TEST-GUIDE.md) آمده است.

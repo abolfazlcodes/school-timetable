@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import * as schema from "@/db/schema";
 import { academicYears, classGroups, classPlans, grades, periods, scheduleCandidates, scheduleRuns, scheduleVersions, scheduleWorkspaces, schoolBreaks, schoolDays, schoolDaySchedules, schoolMemberships, schools, users } from "@/db/schema";
 
-const migrationNames = ["0000_auth_and_schools.sql", "0001_planning_inputs.sql", "0002_planning_invariants.sql", "0003_schedule_runs.sql", "0004_schedule_workspaces.sql", "0005_schedule_versions.sql", "0006_hardening_invariants.sql", "0007_period_overlap_upsert.sql", "0008_school_day_timeline.sql"];
+const migrationNames = ["0000_auth_and_schools.sql", "0001_planning_inputs.sql", "0002_planning_invariants.sql", "0003_schedule_runs.sql", "0004_schedule_workspaces.sql", "0005_schedule_versions.sql", "0006_hardening_invariants.sql", "0007_period_overlap_upsert.sql", "0008_school_day_timeline.sql", "0009_real_school_calibration.sql"];
 const ids = {
   user: "10000000-0000-4000-8000-000000000001",
   outsider: "10000000-0000-4000-8000-000000000002",

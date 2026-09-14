@@ -7,7 +7,7 @@ const data: DashboardData = {
   academicYearTitle: "۱۴۰۵–۱۴۰۶",
   classCount: 18,
   teacherCount: 26,
-  weeklyPeriods: 324,
+  weeklyHours: 324,
   issueCount: 1,
   issues: [{ code: "MISSING_AVAILABILITY", severity: "WARNING", message: "حضور یک دبیر کامل نشده است.", fixHref: "/planning?step=teachers" }],
   progress: 67,

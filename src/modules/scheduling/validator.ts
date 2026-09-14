@@ -1,5 +1,5 @@
 import type { ScheduleAssignment, SchedulingIssue, SchedulingProblem } from "./types";
-import { expandSessions } from "./types";
+import { assignedHoursFor, expandSessions } from "./types";
 
 function longestRun(positions: number[]) {
   const sorted = [...new Set(positions)].sort((a, b) => a - b);
@@ -32,6 +32,7 @@ export function validateSchedule(problem: SchedulingProblem, assignments: Schedu
   const classSlots = new Map<string, string>();
   const teacherSlots = new Map<string, string>();
   const teacherLoads = new Map<string, number>();
+  const teacherSubjectLoads = new Map<string, number>();
   const teacherDayPositions = new Map<string, number[]>();
   const classDayPositions = new Map<string, number[]>();
   const curriculumDays = new Map<string, { dayId: string; sessionId: string }[]>();
@@ -47,15 +48,15 @@ export function validateSchedule(problem: SchedulingProblem, assignments: Schedu
       issues.push({ code: "DUPLICATE_SESSION", severity: "ERROR", message: `جلسه «${session.subjectName}» برای «${session.className}» بیش از یک‌بار قرار گرفته است.`, entityType: "session", entityId: session.id });
     }
     seenSessions.add(session.id);
-    if (!teacher || !teacher.subjectIds.includes(session.subjectId)) {
+    if (!teacher || assignedHoursFor(teacher, session.subjectId) <= 0) {
       issues.push({ code: "INVALID_TEACHER", severity: "ERROR", message: `دبیر انتخاب‌شده برای درس «${session.subjectName}» مجاز نیست.`, entityType: "session", entityId: session.id });
       continue;
     }
     if (assignment.classId !== session.classId || assignment.subjectId !== session.subjectId || assignment.curriculumId !== session.curriculumId) {
       issues.push({ code: "SESSION_REFERENCE_MISMATCH", severity: "ERROR", message: `اطلاعات جلسه «${session.subjectName}» با نیاز درسی کلاس مطابقت ندارد.`, entityType: "session", entityId: session.id });
     }
-    if (assignment.periodIds.length !== session.duration) {
-      issues.push({ code: "INVALID_DURATION", severity: "ERROR", message: `مدت جلسه «${session.subjectName}» رعایت نشده است.`, entityType: "session", entityId: session.id });
+    if (assignment.periodIds.length !== 1) {
+      issues.push({ code: "INVALID_SESSION_SLOT_COUNT", severity: "ERROR", message: `هر جلسه «${session.subjectName}» باید در یک زنگ مدرسه قرار گیرد.`, entityType: "session", entityId: session.id });
     }
     const selectedPeriods = assignment.periodIds.map((id) => periods.get(id));
     const invalidSequence = selectedPeriods.some((period) => !period)
@@ -88,7 +89,9 @@ export function validateSchedule(problem: SchedulingProblem, assignments: Schedu
       }
     }
 
-    teacherLoads.set(teacher.id, (teacherLoads.get(teacher.id) ?? 0) + session.duration);
+    teacherLoads.set(teacher.id, (teacherLoads.get(teacher.id) ?? 0) + session.workloadHours);
+    const teacherSubjectKey = `${teacher.id}:${session.subjectId}`;
+    teacherSubjectLoads.set(teacherSubjectKey, (teacherSubjectLoads.get(teacherSubjectKey) ?? 0) + session.workloadHours);
     const teacherDayKey = `${teacher.id}:${assignment.dayId}`;
     const classDayKey = `${session.classId}:${assignment.dayId}`;
     const validPositions = selectedPeriods.filter(Boolean).map((period) => period!.position);
@@ -108,7 +111,11 @@ export function validateSchedule(problem: SchedulingProblem, assignments: Schedu
     if (load > teacher.maximumWorkload + teacher.overtimeAllowance) {
       issues.push({ code: "WORKLOAD_EXCEEDED", severity: "ERROR", message: `سقف ساعت مجاز «${teacher.name}» رعایت نشده است.`, entityType: "teacher", entityId: teacher.id });
     } else if (load > teacher.maximumWorkload) {
-      issues.push({ code: "OVERTIME", severity: "WARNING", message: `این برنامه برای «${teacher.name}» ${(load - teacher.maximumWorkload).toLocaleString("fa-IR")} زنگ اضافه‌کاری ایجاد می‌کند.`, entityType: "teacher", entityId: teacher.id });
+      issues.push({ code: "OVERTIME", severity: "WARNING", message: `این برنامه برای «${teacher.name}» ${(load - teacher.maximumWorkload).toLocaleString("fa-IR")} ساعت اضافه‌کاری ایجاد می‌کند.`, entityType: "teacher", entityId: teacher.id });
+    }
+    for (const assignment of teacher.subjectAssignments) {
+      const subjectLoad = teacherSubjectLoads.get(`${teacher.id}:${assignment.subjectId}`) ?? 0;
+      if (subjectLoad > assignment.assignedWeeklyHours) issues.push({ code: "SUBJECT_ASSIGNMENT_EXCEEDED", severity: "ERROR", message: `سقف تخصیص سالانه درس برای «${teacher.name}» رعایت نشده است.`, entityType: "teacher", entityId: teacher.id });
     }
     for (const [key, positions] of teacherDayPositions) {
       if (!key.startsWith(`${teacher.id}:`)) continue;

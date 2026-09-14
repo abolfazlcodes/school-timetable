@@ -18,6 +18,10 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), refresh: 
 
 function makeData(mode: TimetableViewData["mode"] = "workspace"): TimetableViewData {
   const problem = makeProblem();
+  problem.classes = [
+    { ...problem.classes[0], name: "دهم ریاضی", gradeId: "grade-10", gradeName: "دهم", majorId: "major-math", majorName: "ریاضی" },
+    { ...problem.classes[1], name: "یازدهم ریاضی", gradeId: "grade-11", gradeName: "یازدهم", majorId: "major-math", majorName: "ریاضی" },
+  ];
   const assignments = [
     { sessionId: "r1:1", curriculumId: "r1", classId: "c1", subjectId: "math", teacherId: "t1", dayId: "sat", startPosition: 1, periodIds: ["sa-1"] },
     { sessionId: "r1:2", curriculumId: "r1", classId: "c1", subjectId: "math", teacherId: "t1", dayId: "sun", startPosition: 1, periodIds: ["su-1"] },
@@ -52,8 +56,41 @@ describe("فضای کاری برنامه هفتگی", () => {
     expect(screen.getByRole("tab", { name: "دبیران" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByLabelText("انتخاب دبیر")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "کل مدرسه" }));
-    expect(screen.getByRole("table")).toHaveTextContent("کلاس");
-    expect(screen.getByRole("table")).toHaveTextContent("دبیر");
+    expect(screen.getByLabelText("انتخاب رشته نمای کل مدرسه")).toHaveValue("major-math");
+    expect(screen.getByRole("table", { name: "برنامه یکپارچه کلاس‌های رشته" })).toHaveTextContent("ایام هفته");
+    expect(screen.getByRole("table", { name: "برنامه یکپارچه کلاس‌های رشته" })).toHaveTextContent("دهم ریاضی");
+    expect(screen.getByRole("table", { name: "برنامه یکپارچه کلاس‌های رشته" })).toHaveTextContent("یازدهم ریاضی");
+    expect(screen.getByRole("table", { name: "برنامه یکپارچه کلاس‌های رشته" })).toHaveTextContent("دبیر ریاضی");
+  });
+
+  it("نمای کل مدرسه را برای یک رشته با کلاس‌های گروهی و زنگ‌های تو در تو می‌سازد", () => {
+    render(<TimetableWorkspace initialData={makeData()} />);
+    fireEvent.click(screen.getByRole("tab", { name: "کل مدرسه" }));
+
+    const table = screen.getByRole("table", { name: "برنامه یکپارچه کلاس‌های رشته" });
+    const classHeaders = table.querySelectorAll(".major-timetable-grid__class");
+    const periodHeaders = table.querySelectorAll(".major-timetable-grid__period");
+
+    expect(classHeaders).toHaveLength(2);
+    expect(classHeaders[0]).toHaveAttribute("colspan", "3");
+    expect(classHeaders[1]).toHaveAttribute("colspan", "3");
+    expect(periodHeaders).toHaveLength(6);
+    expect(screen.getByRole("heading", { name: "برنامه همه کلاس‌های ریاضی" })).toBeInTheDocument();
+    expect(table).toHaveTextContent("شنبه");
+    expect(table).toHaveTextContent("یکشنبه");
+  });
+
+  it("در نمای یکپارچه فقط کلاس‌های رشته انتخاب‌شده را نشان می‌دهد", () => {
+    const data = makeData();
+    data.problem.classes.push({ id: "c3", name: "دهم تجربی", gradeId: "grade-10", gradeName: "دهم", majorId: "major-science", majorName: "علوم تجربی" });
+    render(<TimetableWorkspace initialData={data} />);
+    fireEvent.click(screen.getByRole("tab", { name: "کل مدرسه" }));
+    fireEvent.change(screen.getByLabelText("انتخاب رشته نمای کل مدرسه"), { target: { value: "major-science" } });
+
+    const table = screen.getByRole("table", { name: "برنامه یکپارچه کلاس‌های رشته" });
+    expect(table).toHaveTextContent("دهم تجربی");
+    expect(table).not.toHaveTextContent("دهم ریاضی");
+    expect(screen.getByRole("heading", { name: "برنامه همه کلاس‌های علوم تجربی" })).toBeInTheDocument();
   });
 
   it("ساعت دقیق زنگ را داخل grid نمایش می‌دهد", () => {

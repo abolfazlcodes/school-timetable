@@ -9,7 +9,7 @@
 ## فرایند
 
 1. preflight صحت و کفایت داده را بدون اجرای solver بررسی می‌کند.
-2. curriculum به `LessonRequirement` و سپس sessionهای دارای duration تبدیل می‌شود.
+2. curriculum هر پایه/رشته روی کلاس‌های فعال همان سال گسترش می‌یابد و به `LessonRequirement` و sessionهای دارای `workloadHours` تبدیل می‌شود.
 3. برای هر session، domain همه `(day, startPeriod, teacher)`های مجاز ساخته می‌شود.
 4. propagation گزینه‌های ناقض قیود سخت را حذف می‌کند.
 5. جست‌وجوی CSP با MRV و tie-break پایدار، session بعدی را انتخاب می‌کند.
@@ -21,10 +21,10 @@
 ## قیود سخت
 
 - یک کلاس و یک معلم در یک slot فقط یک جلسه دارند.
-- همه periodهای duration جلسه موجود، فعال، متوالی و در یک روزند.
+- هر جلسه دقیقاً یک period موجود و فعال در همان روز دارد؛ ساعت شروع/پایان period فقط metadata نمایش است.
 - availability معلم و محدودیت روزانه رعایت می‌شود.
-- تعداد جلسه، duration و ساعت curriculum کامل است.
-- assignment درس/معلم معتبر و workload حداکثر (با overtime مجاز) رعایت می‌شود.
+- تعداد جلسه و جمع ساعت آموزشی الگوی curriculum کامل است.
+- تخصیص سالانه درس/دبیر معتبر است؛ بار همان درس از `assignedWeeklyHours` و بار کل از سقف workload (با overtime مجاز) عبور نمی‌کند.
 - constraintهای با severity `HARD` هرگز به preference تبدیل نمی‌شوند.
 - resource/room در فاز یک schema توسعه دارد ولی تا زمان فعال‌شدن feature وارد مسئله نمی‌شود.
 
@@ -50,7 +50,7 @@
 
 ## preflight و no-solution
 
-preflight مواردی مانند curriculum ناقص، نبود assignment، availability خالی، کمبود ظرفیت teacher-slot، pattern نامعتبر و نبود period را با entity reference گزارش می‌دهد. در no-solution، موتور از conflict-setهای ثبت‌شده در propagation یک توضیح سطح دامنه می‌سازد؛ raw stack/solver clause نمایش داده نمی‌شود.
+preflight مواردی مانند curriculum ناقص، نبود assignment سالانه، availability خالی، کمبود ظرفیت هر درس، pattern نامعتبر و نبود period را با entity reference گزارش می‌دهد. نیاز هر درس از جمع کلاس‌های فعال و ظرفیت آن فقط از جمع ساعت تخصیص همان درس محاسبه می‌شود؛ در نتیجه موظفی یک دبیر چنددرسی دوباره‌شماری نمی‌شود. در no-solution توضیح سطح دامنه نمایش داده می‌شود و raw stack/solver clause به کاربر نمی‌رسد.
 
 ## ویرایش دستی
 
@@ -77,7 +77,7 @@ Stage 5 هر candidate را immutable نگه می‌دارد و برای اصل�
 
 - `preflight.ts`: نبود کلاس/curriculum/دبیر/profile/حضور/زنگ و کمبود ظرفیت را قبل از حل گزارش می‌کند.
 - `solver.ts`: domain construction، انتخاب MRV، forward checking، branch-and-bound، signature یکتا و جمع‌آوری حداکثر سه candidate.
-- `validator.ts`: required session، duration، توالی period، مجوز درس دبیر، availability، تداخل کلاس/دبیر، workload و محدودیت روزانه را مستقل از solver دوباره کنترل می‌کند.
+- `validator.ts`: required session، هویت period، تخصیص سالانه درس دبیر، availability، تداخل کلاس/دبیر، workload و محدودیت روزانه را مستقل از solver دوباره کنترل می‌کند.
 - `service.ts`: fingerprint شامل نسخه engine و snapshot canonical است؛ هیچ random seed یا انتخاب تصادفی وجود ندارد.
 - `src/modules/timetable/editor.ts`: تغییر placement، تعویض، برداشتن و مقایسه issueهای قبل/بعد را بدون وابستگی به UI/DB انجام می‌دهد.
 - `src/modules/timetable/service.ts`: مجوز، validation، تأیید هشدار/حذف و optimistic concurrency را هماهنگ می‌کند.
@@ -85,6 +85,8 @@ Stage 5 هر candidate را immutable نگه می‌دارد و برای اصل�
 - `src/modules/exports`: مدل خروجی مشترک، PDF با فونت فارسی embedشده و SpreadsheetML راست‌به‌چپ سازگار با Excel را می‌سازد.
 
 `UNAVAILABLE` و `RESTRICTED` هر دو خارج از domain و hard هستند. سقف مطلق هفتگی برابر `maximum_workload + overtime_allowance` است. `daily_maximum` و `max_consecutive` hard هستند. فاصله از `required_workload`، gapها، period پایانی، تکرار یک درس در یک روز و عدم استفاده از slot ترجیحی penalty نرم می‌گیرند. حداقل workload در preflight هشدار می‌دهد، زیرا ممکن است کل تقاضای درس از حداقل یک دبیر کمتر باشد و تبدیل آن به hard constraint مسئله صحیح مدرسه را بی‌دلیل ناممکن کند.
+
+الگوی `2+2` یعنی دو جلسه با بار آموزشی دو ساعت، نه چهار period فیزیکی. این جداسازی با دادهٔ واقعی ضروری است: در مرجع ۱۴۰۵–۱۴۰۶ هر کلاس ۳۵ ساعت آموزشی دارد، اما grid هفتگی فقط ۲۰ زنگ دارد. طول واقعی زنگ (برای مثال ۷۵ یا ۸۰ دقیقه) همچنان در period نگه‌داری و در رابط/خروجی نمایش داده می‌شود.
 
 بودجه پیش‌فرض ۱۵۰٬۰۰۰ node یا ۳ ثانیه است. اگر جواب معتبر پیش از سقف پیدا شود ذخیره می‌شود و رسیدن به سقف فقط درباره گزینه‌های بیشتر هشدار می‌دهد؛ اگر جواب پیدا نشود هیچ جدول ناقصی به‌عنوان موفق نمایش داده نمی‌شود.
 

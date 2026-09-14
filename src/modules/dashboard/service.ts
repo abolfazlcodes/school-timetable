@@ -10,7 +10,7 @@ export interface DashboardData {
   academicYearTitle: string | null;
   classCount: number;
   teacherCount: number;
-  weeklyPeriods: number;
+  weeklyHours: number;
   issueCount: number;
   issues: SchedulingIssue[];
   progress: number;
@@ -50,7 +50,7 @@ export async function getDashboardData(context: TenantContext, schedulingReposit
     academicYearTitle: problem?.academicYearTitle ?? null,
     classCount: inspection.preflight.summary.classCount,
     teacherCount: inspection.preflight.summary.teacherCount,
-    weeklyPeriods: inspection.preflight.summary.weeklyPeriods,
+    weeklyHours: inspection.preflight.summary.weeklyHours,
     issueCount: issues.length,
     issues: issues.slice(0, 5),
     progress: Math.round((completed / 3) * 100),

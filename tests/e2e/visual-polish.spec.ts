@@ -101,7 +101,7 @@ test("رابط فارسی در نماهای اصلی، themeها و اندازه
 
   await page.setViewportSize({ width: 768, height: 1024 });
   await page.goto("/teachers");
-  await expect(page.locator(".teacher-detail")).toBeVisible();
+  await expect(page.locator(".teacher-detail:visible")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   await capture(page, testInfo, "teachers-dark-tablet");
 

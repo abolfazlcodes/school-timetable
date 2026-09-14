@@ -7,7 +7,7 @@
 - `school_memberships`: ارتباط کاربر/مدرسه با نقش ADMIN یا VICE_PRINCIPAL
 - `sessions`: digest نشست، کاربر، مدرسه فعال و انقضا
 
-این چهار جدول در migration `0000_auth_and_schools.sql` پیاده شده‌اند. foreign key مرکب session تضمین می‌کند `(user_id, active_school_id)` حتماً یک membership واقعی باشد. ایمیل normalize‌شده یکتا، token digest یکتا و session قابل revoke است. جداول ورودی برنامه‌ریزی در `0001_planning_inputs.sql` و کنترل‌های مرکب/الگوی جلسه در `0002_planning_invariants.sql` پیاده شده‌اند. Migrationهای `0006` و `0007` نیز عضویت actorهای برنامه، سازگاری زنجیره snapshot و invariantهای زمان/کلاس را در خود PostgreSQL enforce می‌کنند.
+این چهار جدول در migration `0000_auth_and_schools.sql` پیاده شده‌اند. foreign key مرکب session تضمین می‌کند `(user_id, active_school_id)` حتماً یک membership واقعی باشد. ایمیل normalize‌شده یکتا، token digest یکتا و session قابل revoke است. جداول ورودی برنامه‌ریزی در `0001_planning_inputs.sql` و کنترل‌های مرکب/الگوی جلسه در `0002_planning_invariants.sql` پیاده شده‌اند. Migrationهای `0006` تا `0009` نیز عضویت actorها، timeline، زنجیره snapshot و تخصیص سالانه درس/دبیر را در PostgreSQL enforce می‌کنند.
 
 ## ساختار آموزشی
 
@@ -17,20 +17,20 @@
 - `class_plans`: ورودی تجمیعی تعداد دانش‌آموز، ظرفیت، پیشنهاد و override برای یک پایه/رشته
 - `class_groups`: کلاس در یک سال، پایه و رشته اختیاری، ظرفیت و تعداد دانش‌آموز
 - `subjects`: تعریف قابل استفاده مجدد درس در مدرسه
-- `curriculum_items`: نیاز درس برای پایه/رشته/سال شامل ساعات، تعداد جلسات و pattern
+- `curriculum_items`: قاعدهٔ برنامهٔ درسی برای سال/پایه/رشته/درس شامل ساعت هر کلاس، تعداد جلسات و pattern
 - `LessonRequirement` (مدل دامنه): نیاز واقعی یک درس برای یک کلاس
 - `RequiredSession` (مدل دامنه): جلسه مشتق‌شده از requirement که هنوز زمان‌بندی نشده است
 
-این دو مفهوم از `ScheduleAssignment` جدا هستند: requirement/session می‌گویند «چه چیزی باید تدریس شود» و assignment می‌گوید «در کدام روز و زنگ و با کدام دبیر قرار گرفته است». در فاز یک requirementها به‌شکل قطعی از curriculum و کلاس‌ها ساخته می‌شوند و assignmentها داخل snapshotهای candidate/workspace/version ذخیره می‌شوند.
+این دو مفهوم از `ScheduleAssignment` جدا هستند: curriculum می‌گوید «هر کلاس این دامنه چند ساعت درس دارد»، requirement/session می‌گویند «با کلاس‌های فعال امسال چه چیزی باید تدریس شود» و assignment می‌گوید «در کدام روز و زنگ و با کدام دبیر قرار گرفته است». نیاز کل هر دامنه دقیقاً `active class count × weekly hours per class` است؛ با صفر کلاس، نیاز هم صفر می‌شود. requirementها از curriculum و کلاس‌های همان سال ساخته و assignmentها داخل snapshotهای candidate/workspace/version ذخیره می‌شوند.
 
 ## منابع انسانی
 
 - `teachers`: اطلاعات پایدار شخص؛ `staff_kind` نقش آموزشی/اجرایی را بدون استثنای hardcoded ثبت می‌کند
-- `teacher_subjects`: توانایی تدریس چند درس
+- `teacher_subject_assignments`: تخصیص چندبه‌چند دبیر/درس برای یک سال همراه ساعت پوشش همان درس
 - `teacher_year_profiles`: min/required/max workload و overtime برای یک سال
 - `teacher_availability`: وضعیت AVAILABLE/UNAVAILABLE/PREFERRED/RESTRICTED برای day/period یک سال
 
-`staff_kind` شامل دبیر، معاون و سایر کارکنان دارای مسئولیت تدریس است؛ solver بعدی همه را به‌عنوان یک منبع زمان‌بندی‌شونده می‌بیند و استثنای hardcoded ندارد. محدودیت روزانه و حداکثر زنگ متوالی در profile سالانه ذخیره می‌شود.
+`teachers` اطلاعات قابل استفاده مجدد شخص را نگه می‌دارد، اما درس‌ها، ساعت هر درس، موظفی و حضور همگی با `academic_year_id` نسخه‌دارند. بنابراین یک دبیر می‌تواند در دو سال درس‌ها و ساعت متفاوت داشته باشد و تاریخچه بازنویسی نشود. `staff_kind` شامل دبیر، معاون و سایر کارکنان دارای مسئولیت تدریس است؛ solver همه را یک منبع زمان‌بندی‌شونده می‌بیند و استثنای hardcoded ندارد.
 
 ## ساختار زمان
 
@@ -59,11 +59,12 @@
 - workspace و version فقط می‌توانند به run/candidate/version مبدا در همان مدرسه و سال متصل شوند.
 - JSON مسئله‌ها array و summary/penalty breakdown object است؛ نسخه PUBLISHED نمی‌تواند issue با شدت `ERROR` داشته باشد.
 - امتیاز ذخیره‌شده نسخه در بازه صفر تا ۱۰٬۰۰۰ است.
-- ساعت و تعداد جلسه مثبت است و مجموع pattern دقیقاً برابر ساعات هفتگی است.
+- ساعت هر کلاس و تعداد جلسه مثبت است و مجموع pattern دقیقاً برابر ساعات هفتگی آن کلاس است.
+- جمع تخصیص یک درس از ردیف‌های همان مدرسه و سال محاسبه می‌شود؛ foreign keyهای مرکب اتصال دبیر/درس/سال مدرسه دیگر را رد می‌کنند.
 - `min_workload <= required_workload <= max_workload`; overtime منفی نیست.
 - بازهٔ هر period/break مثبت و داخل ساعت مدرسه است؛ positionها یکتا و پیوسته‌اند و کل timeline بدون overlap یا gap دقیقاً به پایان مدرسه می‌رسد.
 - پایه، رشته، سال و مدرسه هر class group باید دقیقاً با class plan آن یکسان باشد.
-- session چند-periodی فقط روی periodهای متوالی همان روز قرار می‌گیرد.
+- هر session در یک period مدرسه قرار می‌گیرد؛ مقدار pattern بار آموزشی جلسه است و طول ساعت‌دار period مفهوم جداگانه‌ای دارد.
 - snapshot برنامه منتشرشده مستقیم ویرایش نمی‌شود.
 
 ## پیشنهاد تعداد کلاس

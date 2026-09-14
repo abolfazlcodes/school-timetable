@@ -12,7 +12,7 @@ const itemSchema = z.object({
   gradeId: uuid,
   majorId: z.union([uuid, z.literal("")]).transform((value) => value || null),
   subjectId: uuid,
-  weeklyPeriods: positiveInteger("ساعات هفتگی", 30),
+  weeklyHours: positiveInteger("ساعات هفتگی", 30),
   sessionCount: positiveInteger("تعداد جلسه", 15),
   sessionPattern: z.unknown().transform(parseSessionPattern),
 });
@@ -36,7 +36,7 @@ export async function saveCurriculumItem(context: TenantContext, input: unknown,
   requireRole(context, ["ADMIN", "VICE_PRINCIPAL"]);
   const parsed = itemSchema.safeParse(input);
   if (!parsed.success) return { status: "error", message: "اطلاعات ساعات درس را بررسی کنید.", fieldErrors: parsed.error.flatten().fieldErrors as Record<string, string[]> };
-  const patternError = validateSessionPattern(parsed.data.weeklyPeriods, parsed.data.sessionCount, parsed.data.sessionPattern);
+  const patternError = validateSessionPattern(parsed.data.weeklyHours, parsed.data.sessionCount, parsed.data.sessionPattern);
   if (patternError) return { status: "error", message: patternError, fieldErrors: { sessionPattern: [patternError] } };
   if (!await repository.resolveScope(context, parsed.data)) return { status: "error", message: "سال، پایه، رشته یا درس متعلق به مدرسه فعال نیست." };
   await repository.saveItem(context, parsed.data);

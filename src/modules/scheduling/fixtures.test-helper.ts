@@ -15,10 +15,10 @@ export function makeProblem(overrides: Partial<SchedulingProblem> = {}): Schedul
     classes: [{ id: "c1", name: "دهم ۱", gradeId: "g", gradeName: "دهم", majorId: null, majorName: null }, { id: "c2", name: "دهم ۲", gradeId: "g", gradeName: "دهم", majorId: null, majorName: null }],
     periods,
     curriculum: [
-      { id: "r1", classId: "c1", className: "دهم ۱", subjectId: "math", subjectName: "ریاضی", weeklyPeriods: 2, sessionPattern: [1, 1] },
-      { id: "r2", classId: "c2", className: "دهم ۲", subjectId: "math", subjectName: "ریاضی", weeklyPeriods: 2, sessionPattern: [1, 1] },
+      { id: "r1", classId: "c1", className: "دهم ۱", subjectId: "math", subjectName: "ریاضی", weeklyHours: 2, sessionPattern: [1, 1] },
+      { id: "r2", classId: "c2", className: "دهم ۲", subjectId: "math", subjectName: "ریاضی", weeklyHours: 2, sessionPattern: [1, 1] },
     ],
-    teachers: [{ id: "t1", name: "دبیر ریاضی", profileConfigured: true, subjectIds: ["math"], minimumWorkload: 0, requiredWorkload: 4, maximumWorkload: 6, overtimeAllowance: 0, dailyMaximum: 3, maxConsecutive: 2, availability: availability as SchedulingProblem["teachers"][number]["availability"] }],
+    teachers: [{ id: "t1", name: "دبیر ریاضی", profileConfigured: true, subjectAssignments: [{ subjectId: "math", assignedWeeklyHours: 4 }], minimumWorkload: 0, requiredWorkload: 4, maximumWorkload: 6, overtimeAllowance: 0, dailyMaximum: 3, maxConsecutive: 2, availability: availability as SchedulingProblem["teachers"][number]["availability"] }],
     ...overrides,
   };
 }

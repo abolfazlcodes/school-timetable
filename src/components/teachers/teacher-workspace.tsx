@@ -1,12 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { BriefcaseBusiness, CalendarClock, Plus, UserRound, UsersRound } from "lucide-react";
+import { useState } from "react";
+import { BriefcaseBusiness, CalendarClock, Pencil, Plus, UserRound, UsersRound, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/field";
 import type { TeacherWorkspaceData } from "@/modules/teachers/repository";
-import { addTeacherAction, editTeacherAction, saveTeacherAvailabilityAction, saveTeacherProfileAction, saveTeacherSubjectsAction } from "@/modules/teachers/actions";
+import { addTeacherAction, editTeacherAction, saveTeacherAvailabilityAction, saveTeacherProfileAction, saveTeacherSubjectAssignmentsAction } from "@/modules/teachers/actions";
 import { ManagedForm } from "@/components/planning/managed-form";
+import type { ActionState } from "@/modules/planning/action-state";
 import { cn } from "@/lib/utils";
 
 const employmentLabels = { FULL_TIME: "تمام‌وقت", PART_TIME: "پاره‌وقت", CONTRACT: "قراردادی" } as const;
@@ -19,11 +22,82 @@ function TeacherFields({ teacher }: { teacher?: TeacherWorkspaceData["selectedTe
   return <><Labeled label="نام"><Input name="firstName" required defaultValue={teacher?.firstName} /></Labeled><Labeled label="نام خانوادگی"><Input name="lastName" required defaultValue={teacher?.lastName} /></Labeled><Labeled label="کد پرسنلی"><Input name="personnelCode" required defaultValue={teacher?.personnelCode} /></Labeled><Labeled label="نوع همکاری"><Select name="employmentType" defaultValue={teacher?.employmentType ?? "FULL_TIME"}>{Object.entries(employmentLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select></Labeled><Labeled label="مسئولیت"><Select name="staffKind" defaultValue={teacher?.staffKind ?? "TEACHER"}>{Object.entries(staffLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select></Labeled><Labeled label="یادداشت"><Input name="notes" defaultValue={teacher?.notes ?? ""} placeholder="اختیاری" /></Labeled></>;
 }
 
+function TeacherIdentityEditor({ teacher }: { teacher: NonNullable<TeacherWorkspaceData["selectedTeacher"]> }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [formVersion, setFormVersion] = useState(0);
+  const teacherRevision = [teacher.id, teacher.firstName, teacher.lastName, teacher.personnelCode, teacher.employmentType, teacher.staffKind, teacher.notes ?? "", teacher.isActive].join(":");
+  const toggleEditing = () => {
+    setFormVersion((version) => version + 1);
+    setIsEditing((editing) => !editing);
+  };
+  return <section className="panel teacher-section">
+    <div className="teacher-section__title">
+      <div><UserRound size={18} /><span><strong>{teacher.firstName} {teacher.lastName}</strong><small>{isEditing ? "در حال ویرایش اطلاعات دبیر" : "اطلاعات پایدار دبیر · فقط خواندنی"}</small></span></div>
+      <div className="teacher-section__actions"><Badge variant={teacher.isActive ? "success" : "warning"}>{teacher.isActive ? "فعال" : "غیرفعال"}</Badge><Button type="button" variant="secondary" size="sm" onClick={toggleEditing} aria-pressed={isEditing}>{isEditing ? <X size={15} /> : <Pencil size={15} />}{isEditing ? "لغو ویرایش" : "ویرایش اطلاعات دبیر"}</Button></div>
+    </div>
+    <ManagedForm key={`${teacherRevision}:${formVersion}`} action={editTeacherAction} submitLabel="ذخیره مشخصات" hideSubmit={!isEditing} refreshOnSuccess onSuccess={() => setIsEditing(false)}>
+      <input type="hidden" name="teacherId" value={teacher.id} />
+      <fieldset className="form-grid form-grid--three teacher-identity-fields" disabled={!isEditing}>
+        <TeacherFields teacher={teacher} />
+        <label className="check-field"><input type="checkbox" name="isActive" defaultChecked={teacher.isActive} /> دبیر فعال است</label>
+      </fieldset>
+    </ManagedForm>
+  </section>;
+}
+
+type TeacherDetail = NonNullable<TeacherWorkspaceData["selectedTeacher"]>;
+type AvailabilityValue = TeacherDetail["availability"][string];
+
+function normalizedAvailability(teacher: TeacherDetail, schoolDays: TeacherWorkspaceData["schoolDays"]) {
+  return Object.fromEntries(schoolDays.flatMap((day) => day.periods.map((period) => [period.id, teacher.availability[period.id] ?? "AVAILABLE"]))) as Record<string, AvailabilityValue>;
+}
+
+function availabilityRevision(values: Record<string, AvailabilityValue>, schoolDays: TeacherWorkspaceData["schoolDays"]) {
+  return schoolDays.flatMap((day) => day.periods.map((period) => `${period.id}:${values[period.id] ?? "MISSING"}`)).join("|");
+}
+
+function savedAvailabilityFrom(state: ActionState, fallback: Record<string, AvailabilityValue>) {
+  if (!state.data || typeof state.data !== "object" || !("availability" in state.data) || !state.data.availability || typeof state.data.availability !== "object") return fallback;
+  return state.data.availability as Record<string, AvailabilityValue>;
+}
+
+function TeacherAvailabilityEditor({ teacher, academicYearId, schoolDays }: { teacher: TeacherDetail; academicYearId: string; schoolDays: TeacherWorkspaceData["schoolDays"] }) {
+  const positions = [...new Set(schoolDays.flatMap((day) => day.periods.map((period) => period.position)))].sort((a, b) => a - b);
+  const initialAvailability = normalizedAvailability(teacher, schoolDays);
+  const isInitiallyComplete = schoolDays.every((day) => day.periods.every((period) => teacher.availability[period.id] !== undefined));
+  const [availability, setAvailability] = useState(initialAvailability);
+  const [savedRevision, setSavedRevision] = useState(isInitiallyComplete ? availabilityRevision(initialAvailability, schoolDays) : "");
+  const currentRevision = availabilityRevision(availability, schoolDays);
+  const hasUnsavedChanges = currentRevision !== savedRevision;
+
+  return (
+    <ManagedForm action={saveTeacherAvailabilityAction} submitLabel="ذخیره جدول حضور" className="availability-form" refreshOnSuccess onSuccess={(state) => { const saved = savedAvailabilityFrom(state, availability); setAvailability(saved); setSavedRevision(availabilityRevision(saved, schoolDays)); }}>
+      <input type="hidden" name="teacherId" value={teacher.id} />
+      <input type="hidden" name="academicYearId" value={academicYearId} />
+      <div className="availability-sync-state" aria-live="polite">
+        <Badge variant={hasUnsavedChanges ? "warning" : "success"}>{hasUnsavedChanges ? "تغییر ذخیره‌نشده" : "همگام با اطلاعات ذخیره‌شده"}</Badge>
+      </div>
+      <div className="availability-grid-wrap">
+        <table className="availability-grid">
+          <thead><tr><th>زنگ</th>{schoolDays.map((day) => <th key={day.id}>{day.label}</th>)}</tr></thead>
+          <tbody>{positions.map((position) => <tr key={position}><th>زنگ {position.toLocaleString("fa-IR")}</th>{schoolDays.map((day) => {
+            const period = day.periods.find((item) => item.position === position);
+            if (!period) return <td key={day.id}><span className="no-period">—</span></td>;
+            const status = availability[period.id] ?? "AVAILABLE";
+            return <td key={day.id} className={cn("availability-slot", `is-${status.toLowerCase()}`)}><Select name={`slot:${period.id}`} value={status} onChange={(event) => setAvailability((current) => ({ ...current, [period.id]: event.target.value as AvailabilityValue }))} aria-label={`${day.label} ${period.label}`}>{Object.entries(availabilityLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select><small><bdi>{period.startTime.slice(0, 5)}–{period.endTime.slice(0, 5)}</bdi></small></td>;
+          })}</tr>)}</tbody>
+        </table>
+      </div>
+    </ManagedForm>
+  );
+}
+
 export function TeacherWorkspace({ data, embedded = false }: { data: TeacherWorkspaceData; embedded?: boolean }) {
   const selected = data.selectedTeacher;
   const selectHref = (teacherId: string) => embedded ? `/planning?step=teachers&teacher=${teacherId}` : `/teachers?teacher=${teacherId}`;
-  const positions = [...new Set(data.schoolDays.flatMap((day) => day.periods.map((period) => period.position)))].sort((a, b) => a - b);
   const defaults = selected?.profile ?? { minimumWorkload: 20, requiredWorkload: 24, maximumWorkload: 28, overtimeAllowance: 4, dailyMinimum: 0, dailyMaximum: 6, maxConsecutive: 3 };
+  const assignedHours = selected?.subjectAssignments.reduce((sum, item) => sum + item.assignedWeeklyHours, 0) ?? 0;
+  const assignmentBySubject = new Map(selected?.subjectAssignments.map((item) => [item.subjectId, item.assignedWeeklyHours]) ?? []);
   return (
     <div className="teacher-workspace">
       <aside className="teacher-directory panel">
@@ -32,23 +106,25 @@ export function TeacherWorkspace({ data, embedded = false }: { data: TeacherWork
         <details className="inline-disclosure teacher-add"><summary><Plus size={15} /> افزودن دبیر</summary><ManagedForm action={addTeacherAction} submitLabel="افزودن دبیر" className="form-grid form-grid--two"><TeacherFields /></ManagedForm></details>
       </aside>
 
-      <main className="teacher-detail">
+      <main className="teacher-detail" key={selected?.id ?? "no-teacher"}>
         {!data.activeAcademicYear ? <section className="panel inline-callout">ابتدا یک سال تحصیلی فعال تعریف کنید.</section> : !selected ? <section className="panel teacher-empty"><UserRound size={28} /><h2>یک دبیر اضافه کنید</h2><p>مشخصات، درس‌ها، موظفی و حضور در همین صفحه مدیریت می‌شوند.</p></section> : <>
-          <section className="panel teacher-section">
-            <div className="teacher-section__title"><div><UserRound size={18} /><span><strong>{selected.firstName} {selected.lastName}</strong><small>اطلاعات پایدار دبیر</small></span></div><Badge variant={selected.isActive ? "success" : "warning"}>{selected.isActive ? "فعال" : "غیرفعال"}</Badge></div>
-            <ManagedForm action={editTeacherAction} submitLabel="ذخیره مشخصات" className="form-grid form-grid--three"><input type="hidden" name="teacherId" value={selected.id} /><TeacherFields teacher={selected} /><label className="check-field"><input type="checkbox" name="isActive" defaultChecked={selected.isActive} /> دبیر فعال است</label></ManagedForm>
-          </section>
+          <TeacherIdentityEditor teacher={selected} />
 
           <div className="teacher-detail-grid">
             <section className="panel teacher-section">
               <div className="teacher-section__title"><div><BriefcaseBusiness size={18} /><span><strong>درس‌ها و موظفی</strong><small>{data.activeAcademicYear.title}</small></span></div></div>
-              <ManagedForm compact action={saveTeacherSubjectsAction} submitLabel="ذخیره درس‌ها"><input type="hidden" name="teacherId" value={selected.id} /><div className="subject-checks">{data.subjects.filter((subject) => subject.isActive).map((subject) => <label key={subject.id}><input type="checkbox" name="subjectIds" value={subject.id} defaultChecked={selected.subjectIds.includes(subject.id)} /> {subject.name}</label>)}{!data.subjects.some((item) => item.isActive) ? <span className="muted">ابتدا درس‌ها را در گام قبل تعریف کنید.</span> : null}</div></ManagedForm>
-              <ManagedForm compact action={saveTeacherProfileAction} submitLabel="ذخیره موظفی" className="workload-form"><input type="hidden" name="teacherId" value={selected.id} /><input type="hidden" name="academicYearId" value={data.activeAcademicYear.id} /><Labeled label="حداقل"><Input name="minimumWorkload" inputMode="numeric" defaultValue={defaults.minimumWorkload} required /></Labeled><Labeled label="موظفی"><Input name="requiredWorkload" inputMode="numeric" defaultValue={defaults.requiredWorkload} required /></Labeled><Labeled label="حداکثر"><Input name="maximumWorkload" inputMode="numeric" defaultValue={defaults.maximumWorkload} required /></Labeled><Labeled label="اضافه‌کاری مجاز"><Input name="overtimeAllowance" inputMode="numeric" defaultValue={defaults.overtimeAllowance} required /></Labeled><Labeled label="حداقل روزانه"><Input name="dailyMinimum" inputMode="numeric" defaultValue={defaults.dailyMinimum} required /></Labeled><Labeled label="حداکثر روزانه"><Input name="dailyMaximum" inputMode="numeric" defaultValue={defaults.dailyMaximum} required /></Labeled><Labeled label="حداکثر متوالی"><Input name="maxConsecutive" inputMode="numeric" defaultValue={defaults.maxConsecutive} required /></Labeled></ManagedForm>
+              <ManagedForm compact action={saveTeacherSubjectAssignmentsAction} submitLabel="ذخیره تخصیص درس‌ها" refreshOnSuccess>
+                <input type="hidden" name="teacherId" value={selected.id} />
+                <input type="hidden" name="academicYearId" value={data.activeAcademicYear.id} />
+                <div className="subject-assignment-summary"><span>جمع تخصیص سالانه</span><strong>{assignedHours.toLocaleString("fa-IR")} ساعت</strong>{selected.profile ? <small>موظفی ثبت‌شده: {selected.profile.requiredWorkload.toLocaleString("fa-IR")} ساعت</small> : <small>موظفی هنوز ثبت نشده است.</small>}</div>
+                <div className="subject-assignment-grid">{data.subjects.filter((subject) => subject.isActive || assignmentBySubject.has(subject.id)).map((subject) => { const assigned = assignmentBySubject.get(subject.id); return <label key={subject.id}><span><input type="checkbox" name="subjectIds" value={subject.id} defaultChecked={assigned !== undefined} /> {subject.name}</span><Input name={`hours:${subject.id}`} inputMode="numeric" min="1" max="100" defaultValue={assigned || ""} aria-label={`ساعت تخصیص ${subject.name}`} placeholder="ساعت" /></label>; })}{!data.subjects.some((item) => item.isActive) ? <span className="muted">ابتدا درس‌ها را در گام قبل تعریف کنید.</span> : null}</div>
+              </ManagedForm>
+              <ManagedForm compact action={saveTeacherProfileAction} submitLabel="ذخیره موظفی" className="workload-form" refreshOnSuccess><input type="hidden" name="teacherId" value={selected.id} /><input type="hidden" name="academicYearId" value={data.activeAcademicYear.id} /><Labeled label="حداقل"><Input name="minimumWorkload" inputMode="numeric" defaultValue={defaults.minimumWorkload} required /></Labeled><Labeled label="موظفی"><Input name="requiredWorkload" inputMode="numeric" defaultValue={defaults.requiredWorkload} required /></Labeled><Labeled label="حداکثر"><Input name="maximumWorkload" inputMode="numeric" defaultValue={defaults.maximumWorkload} required /></Labeled><Labeled label="اضافه‌کاری مجاز"><Input name="overtimeAllowance" inputMode="numeric" defaultValue={defaults.overtimeAllowance} required /></Labeled><Labeled label="حداقل روزانه"><Input name="dailyMinimum" inputMode="numeric" defaultValue={defaults.dailyMinimum} required /></Labeled><Labeled label="حداکثر روزانه"><Input name="dailyMaximum" inputMode="numeric" defaultValue={defaults.dailyMaximum} required /></Labeled><Labeled label="حداکثر متوالی"><Input name="maxConsecutive" inputMode="numeric" defaultValue={defaults.maxConsecutive} required /></Labeled></ManagedForm>
             </section>
 
             <section className="panel teacher-section availability-section">
               <div className="teacher-section__title"><div><CalendarClock size={18} /><span><strong>روزها و ساعات حضور</strong><small>برای هر زنگ یک وضعیت انتخاب کنید.</small></span></div><div className="availability-legend"><i className="available" />مجاز <i className="preferred" />ترجیحی <i className="restricted" />محدود <i className="unavailable" />غایب</div></div>
-              {data.schoolDays.length && positions.length ? <ManagedForm action={saveTeacherAvailabilityAction} submitLabel="ذخیره جدول حضور" className="availability-form"><input type="hidden" name="teacherId" value={selected.id} /><input type="hidden" name="academicYearId" value={data.activeAcademicYear.id} /><div className="availability-grid-wrap"><table className="availability-grid"><thead><tr><th>زنگ</th>{data.schoolDays.map((day) => <th key={day.id}>{day.label}</th>)}</tr></thead><tbody>{positions.map((position) => <tr key={position}><th>زنگ {position.toLocaleString("fa-IR")}</th>{data.schoolDays.map((day) => { const period = day.periods.find((item) => item.position === position); return <td key={day.id}>{period ? <><Select name={`slot:${period.id}`} defaultValue={selected.availability[period.id] ?? "AVAILABLE"} aria-label={`${day.label} ${period.label}`}>{Object.entries(availabilityLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select><small><bdi>{period.startTime.slice(0, 5)}–{period.endTime.slice(0, 5)}</bdi></small></> : <span className="no-period">—</span>}</td>; })}</tr>)}</tbody></table></div></ManagedForm> : <p className="inline-callout">برای تنظیم حضور، ابتدا روزها و زنگ‌های مدرسه را تعریف کنید.</p>}
+              {data.schoolDays.some((day) => day.periods.length) ? <TeacherAvailabilityEditor key={selected.id} teacher={selected} academicYearId={data.activeAcademicYear.id} schoolDays={data.schoolDays} /> : <p className="inline-callout">برای تنظیم حضور، ابتدا روزها و زنگ‌های مدرسه را تعریف کنید.</p>}
             </section>
           </div>
         </>}

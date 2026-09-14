@@ -28,7 +28,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/field";
 import { cn, formatPersianDateTime } from "@/lib/utils";
-import { expandSessions } from "@/modules/scheduling/types";
+import { assignedHoursFor, expandSessions } from "@/modules/scheduling/types";
 import { createScheduleWorkspaceAction, editTimetableAction } from "@/modules/timetable/actions";
 import { listUnscheduledSessions, type TimetableEditInput, type TimetableEditResult, type TimetableViewData } from "@/modules/timetable/service";
 import { archiveScheduleVersionAction, forkScheduleVersionAction, saveScheduleVersionAction } from "@/modules/schedule-versions/actions";
@@ -63,7 +63,7 @@ function EditDrawer({
     : missingSessions[0];
   const [sessionId, setSessionId] = useState(initialSession?.id ?? "");
   const selectedSession = sessions.find((item) => item.id === sessionId);
-  const qualifiedTeachers = data.problem.teachers.filter((teacher) => selectedSession && teacher.subjectIds.includes(selectedSession.subjectId));
+  const qualifiedTeachers = data.problem.teachers.filter((teacher) => selectedSession && assignedHoursFor(teacher, selectedSession.subjectId) > 0);
   const [teacherId, setTeacherId] = useState(currentAssignment?.teacherId ?? qualifiedTeachers[0]?.id ?? "");
   const [dayId, setDayId] = useState(currentAssignment?.dayId ?? (target.kind === "add" ? target.dayId : data.problem.periods[0]?.dayId ?? ""));
   const [startPosition, setStartPosition] = useState(currentAssignment?.startPosition ?? (target.kind === "add" ? target.startPosition : 1));
@@ -78,18 +78,12 @@ function EditDrawer({
   const availableStarts = (() => {
     if (!selectedSession) return [];
     const dayPeriods = data.problem.periods.filter((period) => period.dayId === dayId).sort((a, b) => a.position - b.position);
-    return dayPeriods.filter((period, index) => {
-      const window = dayPeriods.slice(index, index + selectedSession.duration);
-      return window.length === selectedSession.duration && window.every((item, offset) => offset === 0 || item.position === window[offset - 1].position + 1);
-    });
+    return dayPeriods;
   })();
 
   const effectiveStartPosition = availableStarts.some((period) => period.position === startPosition) ? startPosition : availableStarts[0]?.position ?? 1;
 
-  const sameDurationAssignments = data.assignments.filter((assignment) => {
-    if (!selectedSession || assignment.sessionId === selectedSession.id) return false;
-    return sessions.find((session) => session.id === assignment.sessionId)?.duration === selectedSession.duration;
-  });
+  const sameDurationAssignments = data.assignments.filter((assignment) => selectedSession && assignment.sessionId !== selectedSession.id);
 
   function execute(command: TimetableEditInput) {
     startTransition(async () => {
@@ -146,7 +140,7 @@ function EditDrawer({
             <label className="compact-field">
               <span>جلسه جایگذاری‌نشده</span>
               <Select value={sessionId} onChange={(event) => setSessionId(event.target.value)} aria-label="جلسه جایگذاری‌نشده">
-                {missingSessions.map((session) => <option value={session.id} key={session.id}>{session.subjectName} · {session.className} · {session.duration.toLocaleString("fa-IR")} زنگ</option>)}
+                {missingSessions.map((session) => <option value={session.id} key={session.id}>{session.subjectName} · {session.className} · {session.workloadHours.toLocaleString("fa-IR")} ساعت آموزشی</option>)}
               </Select>
             </label>
           ) : null}
@@ -154,7 +148,7 @@ function EditDrawer({
             <div className="lesson-summary">
               <span>درس<strong>{selectedSession.subjectName}</strong></span>
               <span>کلاس<strong>{selectedSession.className}</strong></span>
-              <span>مدت<strong>{selectedSession.duration.toLocaleString("fa-IR")} زنگ</strong></span>
+              <span>بار جلسه<strong>{selectedSession.workloadHours.toLocaleString("fa-IR")} ساعت آموزشی</strong></span>
             </div>
           ) : <p className="inline-callout">جلسه‌ای برای جایگذاری باقی نمانده است.</p>}
           {selectedSession ? (
@@ -272,16 +266,66 @@ function TimetableGrid({
   );
 }
 
-function SchoolWideGrid({ data }: { data: TimetableViewData }) {
+function SchoolWideGrid({ data, majorId }: { data: TimetableViewData; majorId: string }) {
+  const days = [...new Map(data.problem.periods.map((period) => [period.dayId, period])).values()].sort((a, b) => a.dayOrder - b.dayOrder);
+  const positions = [...new Set(data.problem.periods.map((period) => period.position))].sort((a, b) => a - b);
+  const timesByPosition = new Map(positions.map((position) => [position, [...new Set(data.problem.periods.filter((period) => period.position === position).map((period) => `${period.startTime.slice(0, 5)}–${period.endTime.slice(0, 5)}`))]]));
   const sessions = new Map(expandSessions(data.problem).map((session) => [session.id, session]));
   const teachers = new Map(data.problem.teachers.map((teacher) => [teacher.id, teacher.name]));
-  const periods = new Map(data.problem.periods.map((period) => [period.id, period]));
-  const rows = [...data.assignments].sort((a, b) => {
-    const periodA = periods.get(a.periodIds[0]);
-    const periodB = periods.get(b.periodIds[0]);
-    return (periodA?.dayOrder ?? 0) - (periodB?.dayOrder ?? 0) || a.startPosition - b.startPosition || a.classId.localeCompare(b.classId);
-  });
-  return <div className="timetable-grid-wrap"><table className="school-wide-grid"><thead><tr><th>روز</th><th>زنگ</th><th>ساعت</th><th>کلاس</th><th>درس</th><th>دبیر</th></tr></thead><tbody>{rows.map((assignment) => { const session = sessions.get(assignment.sessionId); const first = periods.get(assignment.periodIds[0]); const last = periods.get(assignment.periodIds.at(-1) ?? ""); return <tr key={assignment.sessionId}><td>{first?.dayLabel}</td><td>{first?.label}{assignment.periodIds.length > 1 ? ` تا ${last?.label}` : ""}</td><td className="ltr-cell">{first?.startTime.slice(0, 5)}–{last?.endTime.slice(0, 5)}</td><td>{session?.className}</td><td>{session?.subjectName}</td><td>{teachers.get(assignment.teacherId)}</td></tr>; })}</tbody></table></div>;
+  const classes = data.problem.classes.filter((schoolClass) => majorId ? schoolClass.majorId === majorId : true);
+  const assignmentsBySlot = new Map<string, TimetableViewData["assignments"][number]>();
+
+  for (const assignment of data.assignments) {
+    for (const periodId of assignment.periodIds) assignmentsBySlot.set(`${assignment.classId}:${periodId}`, assignment);
+  }
+
+  if (!classes.length) {
+    return <div className="major-timetable-empty"><School size={24} /><strong>برای این رشته کلاسی تعریف نشده است.</strong><span>ساختار مدرسه و کلاس‌های فعال سال تحصیلی را بررسی کنید.</span></div>;
+  }
+
+  return (
+    <div className="timetable-grid-wrap major-timetable-wrap">
+      <table className="major-timetable-grid" style={{ minWidth: Math.max(820, classes.length * positions.length * 74 + 104) }} aria-label="برنامه یکپارچه کلاس‌های رشته">
+        <thead>
+          <tr>
+            <th rowSpan={2} className="major-timetable-grid__corner" scope="col">ایام هفته</th>
+            {classes.map((schoolClass) => <th key={schoolClass.id} colSpan={positions.length} scope="colgroup" className="major-timetable-grid__class"><strong>{schoolClass.name}</strong><small>{schoolClass.gradeName}</small></th>)}
+          </tr>
+          <tr>
+            {classes.flatMap((schoolClass) => positions.map((position, positionIndex) => {
+              const times = timesByPosition.get(position) ?? [];
+              return <th key={`${schoolClass.id}:${position}`} scope="col" className={cn("major-timetable-grid__period", positionIndex === 0 && "is-class-start")}><strong>زنگ {position.toLocaleString("fa-IR")}</strong><small>{times.length === 1 ? times[0] : "ساعت متغیر"}</small></th>;
+            }))}
+          </tr>
+        </thead>
+        <tbody>
+          {days.map((day) => (
+            <tr key={day.dayId}>
+              <th scope="row" className="major-timetable-grid__day">{day.dayLabel}</th>
+              {classes.flatMap((schoolClass) => positions.map((position, positionIndex) => {
+                const period = data.problem.periods.find((item) => item.dayId === day.dayId && item.position === position);
+                if (!period) return <td key={`${schoolClass.id}:${position}`} className={cn("major-timetable-grid__cell", "is-unavailable", positionIndex === 0 && "is-class-start")}>—</td>;
+                const assignment = assignmentsBySlot.get(`${schoolClass.id}:${period.id}`);
+                if (!assignment) return <td key={`${schoolClass.id}:${position}`} className={cn("major-timetable-grid__cell", "is-empty", positionIndex === 0 && "is-class-start")}><span>—</span></td>;
+                const session = sessions.get(assignment.sessionId);
+                const hasVariableTime = (timesByPosition.get(position)?.length ?? 0) > 1;
+                const cellIssues = data.issues.filter((issue) => issue.entityType === "session" && issue.entityId === assignment.sessionId);
+                const hasError = cellIssues.some((issue) => issue.severity === "ERROR");
+                const hasWarning = cellIssues.some((issue) => issue.severity === "WARNING");
+                return (
+                  <td key={`${schoolClass.id}:${position}`} className={cn("major-timetable-grid__cell", "has-lesson", hasError && "has-error", !hasError && hasWarning && "has-warning", positionIndex === 0 && "is-class-start")}>
+                    <strong>{session?.subjectName ?? "درس"}</strong>
+                    <span>{teachers.get(assignment.teacherId) ?? "دبیر تعیین نشده"}</span>
+                    {hasVariableTime || assignment.startPosition !== position ? <small>{hasVariableTime ? <bdi>{period.startTime.slice(0, 5)}–{period.endTime.slice(0, 5)}</bdi> : null}{assignment.startPosition !== position ? `${hasVariableTime ? " · " : ""}ادامه جلسه` : ""}</small> : null}
+                  </td>
+                );
+              }))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 const versionLabels = { DRAFT: "پیش‌نویس", PUBLISHED: "منتشرشده", ARCHIVED: "بایگانی‌شده" } as const;
@@ -292,6 +336,7 @@ export function TimetableWorkspace({ initialData, returnTo = "timetable", publis
   const [mode, setMode] = useState<ViewMode>("classes");
   const [gradeId, setGradeId] = useState("");
   const [majorId, setMajorId] = useState("");
+  const [schoolMajorId, setSchoolMajorId] = useState(initialData.problem.classes.find((schoolClass) => schoolClass.majorId)?.majorId ?? "");
   const filteredClasses = data.problem.classes.filter((schoolClass) => (!gradeId || schoolClass.gradeId === gradeId) && (!majorId || schoolClass.majorId === majorId));
   const [selectedClassId, setSelectedClassId] = useState(data.problem.classes[0]?.id ?? "");
   const [selectedTeacherId, setSelectedTeacherId] = useState(data.problem.teachers.find((teacher) => data.assignments.some((assignment) => assignment.teacherId === teacher.id))?.id ?? data.problem.teachers[0]?.id ?? "");
@@ -305,6 +350,8 @@ export function TimetableWorkspace({ initialData, returnTo = "timetable", publis
   const missingSessions = listUnscheduledSessions(data.problem, data.assignments);
 
   const effectiveClassId = filteredClasses.some((item) => item.id === selectedClassId) ? selectedClassId : filteredClasses[0]?.id ?? "";
+  const effectiveSchoolMajorId = majors.some(([id]) => id === schoolMajorId) ? schoolMajorId : majors[0]?.[0] ?? "";
+  const schoolMajorName = majors.find(([id]) => id === effectiveSchoolMajorId)?.[1];
   const exportSource = data.mode === "version" && data.version
     ? `version=${data.version.id}`
     : data.workspaceId
@@ -376,7 +423,7 @@ export function TimetableWorkspace({ initialData, returnTo = "timetable", publis
             <Select value={gradeId} onChange={(event) => setGradeId(event.target.value)} aria-label="فیلتر پایه"><option value="">همه پایه‌ها</option>{grades.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</Select>
             <Select value={majorId} onChange={(event) => setMajorId(event.target.value)} aria-label="فیلتر رشته"><option value="">همه رشته‌ها</option>{majors.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</Select>
             <Select value={effectiveClassId} onChange={(event) => setSelectedClassId(event.target.value)} aria-label="انتخاب کلاس">{filteredClasses.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</Select>
-          </> : mode === "teachers" ? <Select value={selectedTeacherId} onChange={(event) => setSelectedTeacherId(event.target.value)} aria-label="انتخاب دبیر">{data.problem.teachers.map((teacher) => <option value={teacher.id} key={teacher.id}>{teacher.name}</option>)}</Select> : <span className="school-wide-hint">همه جایگذاری‌های مدرسه در یک فهرست</span>}
+          </> : mode === "teachers" ? <Select value={selectedTeacherId} onChange={(event) => setSelectedTeacherId(event.target.value)} aria-label="انتخاب دبیر">{data.problem.teachers.map((teacher) => <option value={teacher.id} key={teacher.id}>{teacher.name}</option>)}</Select> : majors.length ? <><Select value={effectiveSchoolMajorId} onChange={(event) => setSchoolMajorId(event.target.value)} aria-label="انتخاب رشته نمای کل مدرسه">{majors.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</Select><span className="school-wide-hint">همه پایه‌ها و کلاس‌های رشته در یک جدول</span></> : <span className="school-wide-hint">همه کلاس‌های سال تحصیلی در یک جدول</span>}
         </div>
         <div className="timetable-actions">
           {data.mode === "candidate" ? (
@@ -431,10 +478,10 @@ export function TimetableWorkspace({ initialData, returnTo = "timetable", publis
 
       <article className="panel timetable-board">
         <header>
-          <div><h2>{mode === "classes" ? data.problem.classes.find((item) => item.id === effectiveClassId)?.name ?? "برنامه کلاس" : mode === "teachers" ? data.problem.teachers.find((item) => item.id === selectedTeacherId)?.name ?? "برنامه دبیر" : "برنامه کل مدرسه"}</h2><p>{data.academicYearTitle} · {data.version ? `نسخه ${data.version.versionNumber.toLocaleString("fa-IR")}` : `گزینه ${data.source.rank.toLocaleString("fa-IR")}`} · امتیاز {(data.source.score / 100).toLocaleString("fa-IR", { maximumFractionDigits: 1 })}</p></div>
+          <div><h2>{mode === "classes" ? data.problem.classes.find((item) => item.id === effectiveClassId)?.name ?? "برنامه کلاس" : mode === "teachers" ? data.problem.teachers.find((item) => item.id === selectedTeacherId)?.name ?? "برنامه دبیر" : schoolMajorName ? `برنامه همه کلاس‌های ${schoolMajorName}` : "برنامه کل مدرسه"}</h2><p>{data.academicYearTitle} · {data.version ? `نسخه ${data.version.versionNumber.toLocaleString("fa-IR")}` : `گزینه ${data.source.rank.toLocaleString("fa-IR")}`} · امتیاز {(data.source.score / 100).toLocaleString("fa-IR", { maximumFractionDigits: 1 })}</p></div>
           <span>آخرین تغییر: {formatPersianDateTime(data.updatedAt)}</span>
         </header>
-        {mode === "school" ? <SchoolWideGrid data={data} /> : <TimetableGrid data={data} mode={mode} selectedClassId={effectiveClassId} selectedTeacherId={selectedTeacherId} editable={data.mode === "workspace"} onSelect={setEditor} />}
+        {mode === "school" ? <SchoolWideGrid data={data} majorId={effectiveSchoolMajorId} /> : <TimetableGrid data={data} mode={mode} selectedClassId={effectiveClassId} selectedTeacherId={selectedTeacherId} editable={data.mode === "workspace"} onSelect={setEditor} />}
       </article>
 
       <details className="panel timetable-issues" open={counts.errors > 0}>

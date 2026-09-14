@@ -1,4 +1,4 @@
-import { expandSessions, type ScheduleAssignment, type SchedulingIssue, type SchedulingProblem } from "@/modules/scheduling/types";
+import { assignedHoursFor, expandSessions, type ScheduleAssignment, type SchedulingIssue, type SchedulingProblem } from "@/modules/scheduling/types";
 import { validateSchedule, validationIssueKey } from "@/modules/scheduling/validator";
 
 export class TimetableEditError extends Error {
@@ -29,16 +29,14 @@ function sortAssignments(assignments: ScheduleAssignment[]) {
 export function placeSession(problem: SchedulingProblem, assignments: ScheduleAssignment[], input: PlacementInput) {
   const session = expandSessions(problem).find((item) => item.id === input.sessionId);
   if (!session) throw new TimetableEditError("جلسه انتخاب‌شده در نیازهای درسی این سال وجود ندارد.");
-  const teacher = problem.teachers.find((item) => item.id === input.teacherId && item.subjectIds.includes(session.subjectId));
+  const teacher = problem.teachers.find((item) => item.id === input.teacherId && assignedHoursFor(item, session.subjectId) > 0);
   if (!teacher) throw new TimetableEditError("دبیر انتخاب‌شده مجاز به تدریس این درس نیست.");
   const dayPeriods = problem.periods
     .filter((period) => period.dayId === input.dayId)
     .sort((a, b) => a.position - b.position);
   const startIndex = dayPeriods.findIndex((period) => period.position === input.startPosition);
-  const selectedPeriods = startIndex < 0 ? [] : dayPeriods.slice(startIndex, startIndex + session.duration);
-  const isContiguous = selectedPeriods.length === session.duration
-    && selectedPeriods.every((period, index) => index === 0 || period.position === selectedPeriods[index - 1].position + 1);
-  if (!isContiguous) throw new TimetableEditError(`برای این جلسه ${session.duration.toLocaleString("fa-IR")} زنگ متوالی در روز انتخاب‌شده وجود ندارد.`);
+  const selectedPeriods = startIndex < 0 ? [] : [dayPeriods[startIndex]];
+  if (!selectedPeriods.length) throw new TimetableEditError("زنگ انتخاب‌شده در روز موردنظر وجود ندارد.");
   const next: ScheduleAssignment = {
     sessionId: session.id,
     curriculumId: session.curriculumId,
@@ -60,7 +58,6 @@ export function swapSessions(problem: SchedulingProblem, assignments: ScheduleAs
   const firstRequirement = sessions.get(firstSessionId);
   const secondRequirement = sessions.get(secondSessionId);
   if (!first || !second || !firstRequirement || !secondRequirement) throw new TimetableEditError("یکی از جلسات انتخاب‌شده در جدول قرار ندارد.");
-  if (firstRequirement.duration !== secondRequirement.duration) throw new TimetableEditError("فقط دو جلسه با تعداد زنگ یکسان قابل تعویض هستند.");
   return sortAssignments(assignments.map((assignment) => {
     if (assignment.sessionId === firstSessionId) return { ...assignment, dayId: second.dayId, startPosition: second.startPosition, periodIds: [...second.periodIds] };
     if (assignment.sessionId === secondSessionId) return { ...assignment, dayId: first.dayId, startPosition: first.startPosition, periodIds: [...first.periodIds] };

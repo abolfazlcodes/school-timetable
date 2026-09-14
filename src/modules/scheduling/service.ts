@@ -13,7 +13,7 @@ export async function inspectSchedulingData(context: TenantContext, repository: 
   const problem = await repository.loadProblem(context);
   if (!problem) {
     const issue: SchedulingIssue = { code: "MISSING_ACADEMIC_YEAR", severity: "ERROR", message: "سال تحصیلی فعال تعیین نشده است.", entityType: "school", fixHref: "/planning?step=structure" };
-    return { problem: null, preflight: { canGenerate: false, issues: [issue], summary: { classCount: 0, teacherCount: 0, weeklyPeriods: 0, sessionCount: 0, errorCount: 1, warningCount: 0 } } };
+    return { problem: null, preflight: { canGenerate: false, issues: [issue], summary: { classCount: 0, teacherCount: 0, weeklyHours: 0, sessionCount: 0, errorCount: 1, warningCount: 0 } } };
   }
   return { problem, preflight: runPreflight(problem) };
 }

@@ -11,7 +11,7 @@ export function Dashboard({ data }: { data: DashboardData }) {
   const metrics = [
     { label: "کلاس‌ها", value: data.classCount, icon: GraduationCap },
     { label: "دبیران", value: data.teacherCount, icon: UsersRound },
-    { label: "ساعت هفتگی", value: data.weeklyPeriods, icon: Clock3 },
+    { label: "ساعت هفتگی", value: data.weeklyHours, icon: Clock3 },
   ];
   return (
     <>

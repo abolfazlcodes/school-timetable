@@ -54,11 +54,11 @@ UI (Persian/RTL)
 
 ## پیاده‌سازی ورودی‌های برنامه‌ریزی (Stage 3)
 
-ورودی‌های موتور در چهار مرز ماژولار نگه‌داری می‌شوند: `academic-structure` برای سال/کلاس/زمان مدرسه، `curriculum` برای درس و الگوی جلسه، `teachers` برای نیروی آموزشی و داده سالانه او، و `planning/domain` برای invariantهای مستقل. Server Actionها تنها ورودی فرم را تبدیل می‌کنند؛ اعتبارسنجی عدد فارسی، ظرفیت کلاس، session pattern، workload و availability در service/domain انجام می‌شود.
+ورودی‌های موتور در چهار مرز ماژولار نگه‌داری می‌شوند: `academic-structure` برای سال/کلاس/زمان مدرسه، `curriculum` برای قاعدهٔ ساعت هر کلاس و الگوی جلسه، `teachers` برای شخص و تخصیص/موظفی/حضور سالانه او، و `planning/domain` برای invariantهای مستقل. Server Actionها تنها ورودی فرم را تبدیل می‌کنند؛ اعتبارسنجی عدد فارسی، ظرفیت کلاس، session pattern، workload و availability در service/domain انجام می‌شود. repository زمان‌بندی curriculum سال را روی کلاس‌های فعال همان سال گسترش می‌دهد و سپس تخصیص دبیر را اعمال می‌کند؛ ظرفیت دبیر هیچ‌گاه سازندهٔ curriculum نیست.
 
 `/planning` یک route با stepper هفت‌مرحله‌ای است. در Stage 3 سه گام اول فعال‌اند و مراحل بعدی بدون route یا صفحه نمایشی قفل‌اند. `/teachers` همان `TeacherWorkspace` را بازاستفاده می‌کند تا مدیریت دبیر در sidebar در دسترس باشد، بدون تکثیر منطق یا ساخت صفحه‌های workload/availability.
 
-Migrationهای `0001_planning_inputs.sql` و `0002_planning_invariants.sql` برای رابطه‌های حساس از foreign key مرکب استفاده می‌کنند و جمع/تعداد session pattern را نیز در DB می‌سنجند. بنابراین حتی اگر کنترل service دور زده شود، اتصال سال، پایه، رشته، درس، دبیر، روز یا زنگ یک مدرسه به رکورد مدرسه دیگر در PostgreSQL رد می‌شود. حذف سخت در UI این Stage وجود ندارد؛ غیرفعال‌سازی، تاریخچه و قابلیت استفاده مجدد را حفظ می‌کند.
+Migrationهای `0001_planning_inputs.sql` و `0002_planning_invariants.sql` برای رابطه‌های حساس از foreign key مرکب استفاده می‌کنند و جمع/تعداد session pattern را نیز در DB می‌سنجند. migration `0009` رابطهٔ قدیمی دبیر/درس را به تخصیص سالانهٔ دارای ساعت ارتقا می‌دهد؛ دادهٔ قدیمی بدون حدس ساعت و با مقدار نیازمند بازبینی منتقل می‌شود. بنابراین حتی اگر کنترل service دور زده شود، اتصال سال، پایه، رشته، درس، دبیر، روز یا زنگ یک مدرسه به رکورد مدرسه دیگر در PostgreSQL رد می‌شود. حذف سخت در UI وجود ندارد؛ غیرفعال‌سازی، تاریخچه و قابلیت استفاده مجدد را حفظ می‌کند.
 
 اصلاح پس از فاز یک، خط زمانی هر روز را با `school_day_schedules` و `school_breaks` صریح کرده است. پیکربندی روز شروع/پایان، تعداد زنگ و حالت خودکار/دستی را نگه می‌دارد؛ فاصله‌ها رکورد مستقل `BREAK` یا `TRANSITION` هستند و lesson/slot جعلی محسوب نمی‌شوند. محاسبهٔ خودکار پس از کسر فاصله‌های قابل‌تنظیم، دقیقه‌های تدریس باقی‌مانده را به‌شکل قطعی پخش می‌کند و دقیقاً به پایان مدرسه می‌رسد. ذخیرهٔ دستی همان validator خط زمانی و constraint trigger تعویقی migration `0008_school_day_timeline.sql` را طی می‌کند. شناسهٔ زنگ‌های هم‌موقعیت هنگام ویرایش حفظ می‌شود تا availability ثبت‌شدهٔ دبیران بی‌دلیل از بین نرود.
 
@@ -82,7 +82,7 @@ Route handlerها JSON envelope نسخه‌پذیر بازمی‌گردانند.
 
 ## تاریخچه و نسخه‌بندی
 
-پیکربندی معلم و curriculum قابل استفاده مجدد است اما assignment و availability سالانه نسخه خود را دارند. هر generation یک `schedule_run` با input fingerprint، seed ثابت، وضعیت، زمان اجرا و آمار می‌سازد. candidateها و entryهای هر نسخه حفظ می‌شوند. تغییر availability، نسخه قبلی را mutate نمی‌کند.
+هویت معلم و فهرست درس مدرسه قابل استفاده مجدد است، اما curriculum، تخصیص ساعت هر درس به دبیر، workload و availability سالانه نسخهٔ خود را دارند. هر generation یک `schedule_run` با input fingerprint، seed ثابت، وضعیت، زمان اجرا و آمار می‌سازد. candidateها و entryهای هر نسخه حفظ می‌شوند. تغییر کلاس، curriculum، تخصیص یا availability در سال جدید، نسخه قبلی را mutate نمی‌کند.
 
 در Stage 4، `schedule_runs` و `schedule_candidates` مرز persistence نتیجه حل را فراهم می‌کنند. این رکوردها tenant-scoped هستند و FK مرکب اجازه اتصال run به سال مدرسه دیگر یا candidate به run مدرسه دیگر را نمی‌دهد. تبدیل candidate به workspace قابل ویرایش در Stage 5 و versioning انتشار در Stage 6 انجام می‌شود.
 

@@ -18,13 +18,13 @@ function makeTypicalSchool(): SchedulingProblem {
   }))).flat();
   const classes = Array.from({ length: 12 }, (_, index) => ({ id: `c${index + 1}`, name: `کلاس ${index + 1}`, gradeId: index < 6 ? "g10" : "g11", gradeName: index < 6 ? "دهم" : "یازدهم", majorId: "science", majorName: "تجربی" }));
   const subjects = ["ادبیات", "ریاضی", "زبان", "علوم"];
-  const curriculum = classes.flatMap((schoolClass) => subjects.map((name, subjectIndex) => ({ id: `r-${schoolClass.id}-s${subjectIndex + 1}`, classId: schoolClass.id, className: schoolClass.name, subjectId: `s${subjectIndex + 1}`, subjectName: name, weeklyPeriods: 2, sessionPattern: [2] })));
+  const curriculum = classes.flatMap((schoolClass) => subjects.map((name, subjectIndex) => ({ id: `r-${schoolClass.id}-s${subjectIndex + 1}`, classId: schoolClass.id, className: schoolClass.name, subjectId: `s${subjectIndex + 1}`, subjectName: name, weeklyHours: 2, sessionPattern: [2] })));
   const availability = Object.fromEntries(periods.map((period) => [period.id, period.position === 1 ? "PREFERRED" : "AVAILABLE"]));
   const teachers = subjects.flatMap((_, subjectIndex) => [0, 1].map((teacherIndex) => ({
     id: `t${subjectIndex + 1}-${teacherIndex + 1}`,
     name: `دبیر ${subjectIndex + 1}-${teacherIndex + 1}`,
     profileConfigured: true,
-    subjectIds: [`s${subjectIndex + 1}`],
+    subjectAssignments: [{ subjectId: `s${subjectIndex + 1}`, assignedWeeklyHours: 12 }],
     minimumWorkload: 8,
     requiredWorkload: 12,
     maximumWorkload: 16,

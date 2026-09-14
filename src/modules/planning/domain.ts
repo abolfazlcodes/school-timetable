@@ -45,16 +45,16 @@ export function parseSessionPattern(value: unknown) {
   return normalizeDigits(value).split(/[+,،\s]+/).filter(Boolean).map(Number);
 }
 
-export function validateSessionPattern(weeklyPeriods: number, sessionCount: number, pattern: number[]) {
+export function validateSessionPattern(weeklyHours: number, sessionCount: number, pattern: number[]) {
   if (pattern.length !== sessionCount) return "تعداد بخش‌های الگوی جلسات باید با تعداد جلسه برابر باشد.";
-  if (pattern.some((duration) => !Number.isInteger(duration) || duration <= 0)) return "مدت هر جلسه باید عدد صحیح و بیشتر از صفر باشد.";
-  if (pattern.reduce((sum, duration) => sum + duration, 0) !== weeklyPeriods) return "مجموع الگوی جلسات باید با ساعات هفتگی برابر باشد.";
+  if (pattern.some((hours) => !Number.isInteger(hours) || hours <= 0)) return "ساعت آموزشی هر جلسه باید عدد صحیح و بیشتر از صفر باشد.";
+  if (pattern.reduce((sum, hours) => sum + hours, 0) !== weeklyHours) return "مجموع الگوی جلسات باید با ساعات هفتگی برابر باشد.";
   return null;
 }
 
-export function calculateCurriculumWorkload(classCount: number, weeklyPeriods: number) {
-  if (classCount < 0 || weeklyPeriods < 0) throw new Error("ورودی محاسبه ساعات معتبر نیست.");
-  return classCount * weeklyPeriods;
+export function calculateCurriculumWorkload(classCount: number, weeklyHours: number) {
+  if (classCount < 0 || weeklyHours < 0) throw new Error("ورودی محاسبه ساعات معتبر نیست.");
+  return classCount * weeklyHours;
 }
 
 export interface WorkloadLimits {

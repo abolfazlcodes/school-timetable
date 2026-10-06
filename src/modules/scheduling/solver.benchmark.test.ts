@@ -14,6 +14,7 @@ function makeTypicalSchool(): SchedulingProblem {
     label: `زنگ ${periodIndex + 1}`,
     startTime: `${String(7 + periodIndex).padStart(2, "0")}:30`,
     endTime: `${String(8 + periodIndex).padStart(2, "0")}:15`,
+    instructionalUnits: 2,
     isLast: periodIndex === 5,
   }))).flat();
   const classes = Array.from({ length: 12 }, (_, index) => ({ id: `c${index + 1}`, name: `کلاس ${index + 1}`, gradeId: index < 6 ? "g10" : "g11", gradeName: index < 6 ? "دهم" : "یازدهم", majorId: "science", majorName: "تجربی" }));
@@ -37,10 +38,10 @@ function makeTypicalSchool(): SchedulingProblem {
 }
 
 describe("benchmark مدرسه متعارف", () => {
-  it("۱۲ کلاس، ۴۸ جلسه و ۸ دبیر را در budget تولید و مستقل اعتبارسنجی می‌کند", () => {
+  it("۱۲ کلاس، ۴۸ جلسه و ۸ دبیر را در budget تولید و مستقل اعتبارسنجی می‌کند", async () => {
     const problem = makeTypicalSchool();
     const started = performance.now();
-    const result = solveSchedule(problem, { maxCandidates: 1, nodeBudget: 250_000, timeBudgetMs: 3_000 });
+    const result = await solveSchedule(problem, { maxCandidates: 1, nodeBudget: 250_000, timeBudgetMs: 3_000 });
     const wallTimeMs = Math.round(performance.now() - started);
     expect(result.status).toBe("SUCCEEDED");
     expect(result.candidates).toHaveLength(1);

@@ -354,6 +354,7 @@ export const periods = pgTable(
     label: varchar("label", { length: 32 }).notNull(),
     startTime: time("start_time", { withTimezone: false }).notNull(),
     endTime: time("end_time", { withTimezone: false }).notNull(),
+    instructionalUnits: integer("instructional_units").notNull().default(1),
     breakAfterMinutes: integer("break_after_minutes").notNull().default(0),
     isActive: boolean("is_active").notNull().default(true),
   },
@@ -480,6 +481,42 @@ export const teacherSubjectAssignments = pgTable(
     index("teacher_subject_assignments_school_year_idx").on(
       table.schoolId,
       table.academicYearId,
+    ),
+  ],
+);
+
+export const classSubjectTeacherAssignments = pgTable(
+  "class_subject_teacher_assignments",
+  {
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    academicYearId: uuid("academic_year_id")
+      .notNull()
+      .references(() => academicYears.id, { onDelete: "cascade" }),
+    classId: uuid("class_id")
+      .notNull()
+      .references(() => classGroups.id, { onDelete: "cascade" }),
+    subjectId: uuid("subject_id")
+      .notNull()
+      .references(() => subjects.id, { onDelete: "restrict" }),
+    teacherId: uuid("teacher_id")
+      .notNull()
+      .references(() => teachers.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    primaryKey({
+      name: "class_subject_teacher_assignments_pk",
+      columns: [table.academicYearId, table.classId, table.subjectId],
+    }),
+    index("class_subject_teacher_assignments_school_year_idx").on(
+      table.schoolId,
+      table.academicYearId,
+    ),
+    index("class_subject_teacher_assignments_teacher_idx").on(
+      table.schoolId,
+      table.academicYearId,
+      table.teacherId,
     ),
   ],
 );

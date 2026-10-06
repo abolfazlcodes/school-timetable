@@ -93,6 +93,14 @@ describe("فضای کاری برنامه هفتگی", () => {
     expect(screen.getByRole("heading", { name: "برنامه همه کلاس‌های علوم تجربی" })).toBeInTheDocument();
   });
 
+  it("در منوی خروجی فقط PDF جدول کل مدرسه را برای همه رشته‌ها ارائه می‌کند", () => {
+    render(<TimetableWorkspace initialData={makeData()} />);
+    const pdfLink = screen.getByRole("link", { name: "PDF جدول کل مدرسه" });
+    expect(pdfLink).toHaveAttribute("href", expect.stringContaining("view=school"));
+    expect(screen.queryByRole("link", { name: "PDF فارسی" })).not.toBeInTheDocument();
+    expect(screen.getByText("هر رشته در یک صفحه جداگانه")).toBeInTheDocument();
+  });
+
   it("ساعت دقیق زنگ را داخل grid نمایش می‌دهد", () => {
     const data = makeData();
     data.problem.periods[0] = { ...data.problem.periods[0], startTime: "08:00", endTime: "09:15" };

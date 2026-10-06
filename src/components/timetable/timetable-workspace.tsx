@@ -28,7 +28,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/field";
 import { cn, formatPersianDateTime } from "@/lib/utils";
-import { assignedHoursFor, expandSessions } from "@/modules/scheduling/types";
+import { assignedHoursFor, compatibleWeekPatterns, expandSessions, normalizedWeekPattern, weekPatternLabel, type WeekPattern } from "@/modules/scheduling/types";
 import { createScheduleWorkspaceAction, editTimetableAction } from "@/modules/timetable/actions";
 import { listUnscheduledSessions, type TimetableEditInput, type TimetableEditResult, type TimetableViewData } from "@/modules/timetable/service";
 import { archiveScheduleVersionAction, forkScheduleVersionAction, saveScheduleVersionAction } from "@/modules/schedule-versions/actions";
@@ -67,6 +67,7 @@ function EditDrawer({
   const [teacherId, setTeacherId] = useState(currentAssignment?.teacherId ?? qualifiedTeachers[0]?.id ?? "");
   const [dayId, setDayId] = useState(currentAssignment?.dayId ?? (target.kind === "add" ? target.dayId : data.problem.periods[0]?.dayId ?? ""));
   const [startPosition, setStartPosition] = useState(currentAssignment?.startPosition ?? (target.kind === "add" ? target.startPosition : 1));
+  const [weekPattern, setWeekPattern] = useState<WeekPattern>(currentAssignment ? normalizedWeekPattern(currentAssignment) : "EVERY_WEEK");
   const [swapTarget, setSwapTarget] = useState("");
   const [feedback, setFeedback] = useState<TimetableEditResult | null>(null);
   const [pendingCommand, setPendingCommand] = useState<TimetableEditInput | null>(null);
@@ -78,10 +79,13 @@ function EditDrawer({
   const availableStarts = (() => {
     if (!selectedSession) return [];
     const dayPeriods = data.problem.periods.filter((period) => period.dayId === dayId).sort((a, b) => a.position - b.position);
-    return dayPeriods;
+    return dayPeriods.filter((period) => compatibleWeekPatterns(selectedSession.workloadHours, period.instructionalUnits).length > 0);
   })();
 
   const effectiveStartPosition = availableStarts.some((period) => period.position === startPosition) ? startPosition : availableStarts[0]?.position ?? 1;
+  const selectedPeriod = availableStarts.find((period) => period.position === effectiveStartPosition);
+  const availableWeekPatterns = selectedSession && selectedPeriod ? compatibleWeekPatterns(selectedSession.workloadHours, selectedPeriod.instructionalUnits) : [];
+  const effectiveWeekPattern = availableWeekPatterns.includes(weekPattern) ? weekPattern : availableWeekPatterns[0] ?? "EVERY_WEEK";
 
   const sameDurationAssignments = data.assignments.filter((assignment) => selectedSession && assignment.sessionId !== selectedSession.id);
 
@@ -108,6 +112,7 @@ function EditDrawer({
       teacherId: effectiveTeacherId,
       dayId,
       startPosition: effectiveStartPosition,
+      weekPattern: effectiveWeekPattern,
       confirmWarnings,
     });
   }
@@ -156,6 +161,7 @@ function EditDrawer({
               <label className="compact-field"><span>دبیر</span><Select value={effectiveTeacherId} onChange={(event) => setTeacherId(event.target.value)} aria-label="دبیر جلسه">{qualifiedTeachers.map((teacher) => <option value={teacher.id} key={teacher.id}>{teacher.name}</option>)}</Select></label>
               <label className="compact-field"><span>روز</span><Select value={dayId} onChange={(event) => setDayId(event.target.value)} aria-label="روز جلسه">{[...new Map(data.problem.periods.map((period) => [period.dayId, period])).values()].sort((a, b) => a.dayOrder - b.dayOrder).map((day) => <option value={day.dayId} key={day.dayId}>{day.dayLabel}</option>)}</Select></label>
               <label className="compact-field"><span>شروع جلسه</span><Select value={effectiveStartPosition} onChange={(event) => setStartPosition(Number(event.target.value))} aria-label="زنگ شروع">{availableStarts.map((period) => <option value={period.position} key={period.id}>{period.label} · {period.startTime.slice(0, 5)}</option>)}</Select></label>
+              {availableWeekPatterns.length > 1 ? <label className="compact-field"><span>نوبت اجرا</span><Select value={effectiveWeekPattern} onChange={(event) => setWeekPattern(event.target.value as WeekPattern)} aria-label="نوبت اجرای جلسه">{availableWeekPatterns.map((pattern) => <option value={pattern} key={pattern}>{weekPatternLabel(pattern)}</option>)}</Select></label> : null}
             </div>
           ) : null}
 
@@ -234,27 +240,35 @@ function TimetableGrid({
               cells.push(<td className="is-unavailable" key={position}>—</td>);
               continue;
             }
-            const assignment = relevantAssignments.find((item) => item.periodIds.includes(period.id));
-            if (assignment && assignment.startPosition !== position) continue;
-            if (assignment) {
-              const session = sessions.get(assignment.sessionId);
-              const teacher = teachers.get(assignment.teacherId);
-              const cellIssues = data.issues.filter((issue) => issue.entityType === "session" && issue.entityId === assignment.sessionId);
+            const coveringAssignments = relevantAssignments.filter((item) => item.periodIds.includes(period.id));
+            if (coveringAssignments.length && coveringAssignments.every((item) => item.startPosition !== position)) continue;
+            const slotAssignments = coveringAssignments.filter((item) => item.startPosition === position);
+            if (slotAssignments.length) {
+              const cellIssues = slotAssignments.flatMap((assignment) => data.issues.filter((issue) => issue.entityType === "session" && issue.entityId === assignment.sessionId));
               const hasError = cellIssues.some((issue) => issue.severity === "ERROR");
               const hasWarning = cellIssues.some((issue) => issue.severity === "WARNING");
+              const columnSpan = Math.max(...slotAssignments.map((assignment) => assignment.periodIds.length));
               cells.push(
-                <td colSpan={assignment.periodIds.length} key={position} className={cn("has-lesson", hasError && "has-error", !hasError && hasWarning && "has-warning")}>
-                  <button type="button" className="lesson-cell" onClick={() => editable && onSelect({ kind: "edit", sessionId: assignment.sessionId })} disabled={!editable} aria-label={`ویرایش ${session?.subjectName ?? "جلسه"}`}>
-                    <strong>{session?.subjectName}</strong>
-                    <span>{mode === "classes" ? teacher?.name : session?.className}</span>
-                    <small><bdi>{period.startTime.slice(0, 5)}–{data.problem.periods.find((item) => item.id === assignment.periodIds.at(-1))?.endTime.slice(0, 5)}</bdi>{assignment.periodIds.length > 1 ? ` · ${assignment.periodIds.length.toLocaleString("fa-IR")} زنگ` : ""}{hasError ? " · خطا" : hasWarning ? " · هشدار" : ""}</small>
-                  </button>
+                <td colSpan={columnSpan} key={position} className={cn("has-lesson", hasError && "has-error", !hasError && hasWarning && "has-warning")}>
+                  <div className={cn("lesson-cell-group", slotAssignments.length > 1 && "is-alternating")}>
+                    {slotAssignments.sort((a, b) => normalizedWeekPattern(a).localeCompare(normalizedWeekPattern(b))).map((assignment) => {
+                      const session = sessions.get(assignment.sessionId);
+                      const teacher = teachers.get(assignment.teacherId);
+                      const pattern = normalizedWeekPattern(assignment);
+                      return <button type="button" className="lesson-cell" key={assignment.sessionId} onClick={() => editable && onSelect({ kind: "edit", sessionId: assignment.sessionId })} disabled={!editable} aria-label={`ویرایش ${session?.subjectName ?? "جلسه"}`}>
+                        {pattern !== "EVERY_WEEK" ? <em>{weekPatternLabel(pattern)}</em> : null}
+                        <strong>{session?.subjectName}</strong>
+                        <span>{mode === "classes" ? teacher?.name : session?.className}</span>
+                        <small><bdi>{period.startTime.slice(0, 5)}–{data.problem.periods.find((item) => item.id === assignment.periodIds.at(-1))?.endTime.slice(0, 5)}</bdi>{assignment.periodIds.length > 1 ? ` · ${assignment.periodIds.length.toLocaleString("fa-IR")} زنگ` : ""}{hasError ? " · خطا" : hasWarning ? " · هشدار" : ""}</small>
+                      </button>;
+                    })}
+                  </div>
                 </td>,
               );
             } else {
               cells.push(
                 <td className="is-empty" key={position}>
-                  {editable ? <button type="button" onClick={() => onSelect({ kind: "add", dayId: day.dayId, startPosition: position })} aria-label={`افزودن جلسه در ${day.dayLabel} زنگ ${position.toLocaleString("fa-IR")}`}><small><bdi>{period.startTime.slice(0, 5)}–{period.endTime.slice(0, 5)}</bdi></small><span><Plus size={14} /> افزودن</span></button> : <span className="empty-period-time"><bdi>{period.startTime.slice(0, 5)}–{period.endTime.slice(0, 5)}</bdi></span>}
+                  {editable ? <button type="button" onClick={() => onSelect({ kind: "add", dayId: day.dayId, startPosition: position })} aria-label={`افزودن جلسه در ${day.dayLabel} زنگ ${position.toLocaleString("fa-IR")}`}><small><bdi>{period.startTime.slice(0, 5)}–{period.endTime.slice(0, 5)}</bdi></small><strong className="empty-slot-marker">****</strong><span><Plus size={14} /> افزودن</span></button> : <span className="empty-period-time"><bdi>{period.startTime.slice(0, 5)}–{period.endTime.slice(0, 5)}</bdi><strong className="empty-slot-marker">****</strong></span>}
                 </td>,
               );
             }
@@ -273,10 +287,13 @@ function SchoolWideGrid({ data, majorId }: { data: TimetableViewData; majorId: s
   const sessions = new Map(expandSessions(data.problem).map((session) => [session.id, session]));
   const teachers = new Map(data.problem.teachers.map((teacher) => [teacher.id, teacher.name]));
   const classes = data.problem.classes.filter((schoolClass) => majorId ? schoolClass.majorId === majorId : true);
-  const assignmentsBySlot = new Map<string, TimetableViewData["assignments"][number]>();
+  const assignmentsBySlot = new Map<string, TimetableViewData["assignments"]>();
 
   for (const assignment of data.assignments) {
-    for (const periodId of assignment.periodIds) assignmentsBySlot.set(`${assignment.classId}:${periodId}`, assignment);
+    for (const periodId of assignment.periodIds) {
+      const key = `${assignment.classId}:${periodId}`;
+      assignmentsBySlot.set(key, [...(assignmentsBySlot.get(key) ?? []), assignment]);
+    }
   }
 
   if (!classes.length) {
@@ -305,18 +322,24 @@ function SchoolWideGrid({ data, majorId }: { data: TimetableViewData; majorId: s
               {classes.flatMap((schoolClass) => positions.map((position, positionIndex) => {
                 const period = data.problem.periods.find((item) => item.dayId === day.dayId && item.position === position);
                 if (!period) return <td key={`${schoolClass.id}:${position}`} className={cn("major-timetable-grid__cell", "is-unavailable", positionIndex === 0 && "is-class-start")}>—</td>;
-                const assignment = assignmentsBySlot.get(`${schoolClass.id}:${period.id}`);
-                if (!assignment) return <td key={`${schoolClass.id}:${position}`} className={cn("major-timetable-grid__cell", "is-empty", positionIndex === 0 && "is-class-start")}><span>—</span></td>;
-                const session = sessions.get(assignment.sessionId);
+                const slotAssignments = assignmentsBySlot.get(`${schoolClass.id}:${period.id}`) ?? [];
+                if (!slotAssignments.length) return <td key={`${schoolClass.id}:${position}`} className={cn("major-timetable-grid__cell", "is-empty", positionIndex === 0 && "is-class-start")}><span className="empty-slot-marker">****</span></td>;
                 const hasVariableTime = (timesByPosition.get(position)?.length ?? 0) > 1;
-                const cellIssues = data.issues.filter((issue) => issue.entityType === "session" && issue.entityId === assignment.sessionId);
+                const cellIssues = slotAssignments.flatMap((assignment) => data.issues.filter((issue) => issue.entityType === "session" && issue.entityId === assignment.sessionId));
                 const hasError = cellIssues.some((issue) => issue.severity === "ERROR");
                 const hasWarning = cellIssues.some((issue) => issue.severity === "WARNING");
                 return (
                   <td key={`${schoolClass.id}:${position}`} className={cn("major-timetable-grid__cell", "has-lesson", hasError && "has-error", !hasError && hasWarning && "has-warning", positionIndex === 0 && "is-class-start")}>
-                    <strong>{session?.subjectName ?? "درس"}</strong>
-                    <span>{teachers.get(assignment.teacherId) ?? "دبیر تعیین نشده"}</span>
-                    {hasVariableTime || assignment.startPosition !== position ? <small>{hasVariableTime ? <bdi>{period.startTime.slice(0, 5)}–{period.endTime.slice(0, 5)}</bdi> : null}{assignment.startPosition !== position ? `${hasVariableTime ? " · " : ""}ادامه جلسه` : ""}</small> : null}
+                    {slotAssignments.map((assignment) => {
+                      const session = sessions.get(assignment.sessionId);
+                      const pattern = normalizedWeekPattern(assignment);
+                      return <div className="major-timetable-grid__lesson" key={assignment.sessionId}>
+                        {pattern !== "EVERY_WEEK" ? <em>{weekPatternLabel(pattern)}</em> : null}
+                        <strong>{session?.subjectName ?? "درس"}</strong>
+                        <span>{teachers.get(assignment.teacherId) ?? "دبیر تعیین نشده"}</span>
+                        {hasVariableTime || assignment.startPosition !== position ? <small>{hasVariableTime ? <bdi>{period.startTime.slice(0, 5)}–{period.endTime.slice(0, 5)}</bdi> : null}{assignment.startPosition !== position ? `${hasVariableTime ? " · " : ""}ادامه جلسه` : ""}</small> : null}
+                      </div>;
+                    })}
                   </td>
                 );
               }))}
@@ -357,7 +380,6 @@ export function TimetableWorkspace({ initialData, returnTo = "timetable", publis
     : data.workspaceId
       ? `workspace=${data.workspaceId}`
       : `run=${data.source.runId}&rank=${data.source.rank}`;
-  const exportView = mode === "classes" ? `class&resource=${effectiveClassId}` : mode === "teachers" ? `teacher&resource=${selectedTeacherId}` : "school";
 
   function saveVersion(publish: boolean, confirmWarnings = false) {
     if (!data.workspaceId) return;
@@ -452,11 +474,9 @@ export function TimetableWorkspace({ initialData, returnTo = "timetable", publis
           <details className="version-menu export-menu">
             <summary className="button button--secondary button--sm"><Download size={15} />خروجی</summary>
             <div className="version-menu__popover">
-              <strong>خروجی نمای جاری</strong>
-              <a href={`/api/timetable/export/pdf?${exportSource}&view=${exportView}`}>PDF فارسی</a>
-              <a href={`/api/timetable/export/excel?${exportSource}&view=${exportView}`}>Excel</a>
-              <strong>کل مدرسه</strong>
-              <a href={`/api/timetable/export/pdf?${exportSource}&view=school`}>PDF کل مدرسه</a>
+              <strong>برنامه کامل مدرسه</strong>
+              <a href={`/api/timetable/export/pdf?${exportSource}&view=school`}>PDF جدول کل مدرسه</a>
+              <span className="version-menu__empty">هر رشته در یک صفحه جداگانه</span>
               <a href={`/api/timetable/export/excel?${exportSource}&view=school`}>Excel کل مدرسه</a>
             </div>
           </details>

@@ -1,15 +1,25 @@
 "use client";
 
+import { useMemo, useRef, useState } from "react";
 import {
   BookMarked,
   Calculator,
   CirclePause,
   CirclePlay,
+  PencilLine,
   Plus,
+  RotateCcw,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/field";
 import type { CurriculumWorkspaceData } from "@/modules/curriculum/repository";
+import {
+  describeSessionPattern,
+  normalizeDigits,
+  parseSessionPattern,
+  suggestSessionPatterns,
+} from "@/modules/planning/domain";
 import {
   addSubjectAction,
   saveCurriculumItemAction,
@@ -35,11 +45,96 @@ function Labeled({
   );
 }
 
+type CurriculumDraft = {
+  itemId: string | null;
+  gradeId: string;
+  majorId: string;
+  subjectId: string;
+  weeklyHours: string;
+  sessionPattern: string;
+};
+
+const emptyDraft: CurriculumDraft = {
+  itemId: null,
+  gradeId: "",
+  majorId: "",
+  subjectId: "",
+  weeklyHours: "",
+  sessionPattern: "",
+};
+
+const patternValue = (pattern: number[]) => pattern.join("+");
+
 export function CurriculumWorkspace({
   data,
 }: {
   data: CurriculumWorkspaceData;
 }) {
+  const editorRef = useRef<HTMLElement>(null);
+  const [draft, setDraft] = useState<CurriculumDraft>(emptyDraft);
+  const firstGradeWithItems =
+    data.grades.find((grade) =>
+      data.items.some((item) => item.gradeId === grade.id),
+    )?.id ??
+    data.grades[0]?.id ??
+    "";
+  const [selectedGradeId, setSelectedGradeId] =
+    useState(firstGradeWithItems);
+  const [selectedMajorId, setSelectedMajorId] = useState("all");
+  const activeGradeId = data.grades.some(
+    (grade) => grade.id === selectedGradeId,
+  )
+    ? selectedGradeId
+    : firstGradeWithItems;
+  const activeGrade = data.grades.find(
+    (grade) => grade.id === activeGradeId,
+  );
+  const gradeItems = useMemo(
+    () => data.items.filter((item) => item.gradeId === activeGradeId),
+    [activeGradeId, data.items],
+  );
+  const availableMajors = useMemo(
+    () =>
+      data.majors.filter((major) =>
+        gradeItems.some((item) => item.majorId === major.id),
+      ),
+    [data.majors, gradeItems],
+  );
+  const activeMajorId =
+    selectedMajorId === "all" ||
+    availableMajors.some((major) => major.id === selectedMajorId)
+      ? selectedMajorId
+      : "all";
+  const visibleItems = useMemo(
+    () =>
+      activeMajorId === "all"
+        ? gradeItems
+        : gradeItems.filter(
+            (item) =>
+              item.majorId === activeMajorId || item.majorId === null,
+          ),
+    [activeMajorId, gradeItems],
+  );
+  const weeklyHours = Number(normalizeDigits(draft.weeklyHours));
+  const suggestedPatterns = useMemo(
+    () => suggestSessionPatterns(weeklyHours),
+    [weeklyHours],
+  );
+  const parsedPattern = parseSessionPattern(draft.sessionPattern);
+  const editingItem = data.items.find((item) => item.id === draft.itemId);
+
+  const editItem = (item: CurriculumWorkspaceData["items"][number]) => {
+    setDraft({
+      itemId: item.id,
+      gradeId: item.gradeId,
+      majorId: item.majorId ?? "",
+      subjectId: item.subjectId,
+      weeklyHours: String(item.weeklyHours),
+      sessionPattern: patternValue(item.sessionPattern),
+    });
+    editorRef.current?.scrollIntoView?.({ block: "start" });
+  };
+
   const totalWorkload = data.items
     .filter((item) => item.isActive)
     .reduce((sum, item) => sum + item.totalWorkload, 0);
@@ -177,23 +272,38 @@ export function CurriculumWorkspace({
             </div>
           </section>
         ) : null}
-        <section className="panel">
+        <section className="panel curriculum-editor" ref={editorRef}>
           <div className="panel__header">
             <div>
-              <h2>افزودن یا اصلاح ساعات درس</h2>
+              <h2>
+                {editingItem
+                  ? `ویرایش الگوی ${editingItem.subjectName}`
+                  : "افزودن یا اصلاح ساعات درس"}
+              </h2>
               <p>
                 {data.activeAcademicYear
-                  ? `سال تحصیلی ${data.activeAcademicYear.title}`
+                  ? `سال تحصیلی ${data.activeAcademicYear.title}؛ الگو برای همین پایه و رشته ذخیره می‌شود.`
                   : "ابتدا سال تحصیلی فعال را تعریف کنید"}
               </p>
             </div>
+            {draft.itemId ? (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => setDraft(emptyDraft)}
+              >
+                <RotateCcw size={15} />
+                ثبت ردیف جدید
+              </Button>
+            ) : null}
           </div>
           {data.activeAcademicYear &&
           data.grades.length &&
           data.subjects.some((subject) => subject.isActive) ? (
             <ManagedForm
               action={saveCurriculumItemAction}
-              submitLabel="ذخیره ساعات درس"
+              submitLabel={draft.itemId ? "ذخیره تغییر الگو" : "ذخیره ساعات درس"}
               className="curriculum-form form-grid form-grid--three"
             >
               <input
@@ -201,8 +311,23 @@ export function CurriculumWorkspace({
                 name="academicYearId"
                 value={data.activeAcademicYear.id}
               />
+              <input
+                type="hidden"
+                name="sessionCount"
+                value={parsedPattern.length}
+              />
               <Labeled label="پایه">
-                <Select name="gradeId" required defaultValue="">
+                <Select
+                  name="gradeId"
+                  required
+                  value={draft.gradeId}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      gradeId: event.target.value,
+                    }))
+                  }
+                >
                   <option value="" disabled>
                     انتخاب پایه
                   </option>
@@ -214,7 +339,16 @@ export function CurriculumWorkspace({
                 </Select>
               </Labeled>
               <Labeled label="رشته">
-                <Select name="majorId" defaultValue="">
+                <Select
+                  name="majorId"
+                  value={draft.majorId}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      majorId: event.target.value,
+                    }))
+                  }
+                >
                   <option value="">همه رشته‌ها</option>
                   {data.majors.map((major) => (
                     <option key={major.id} value={major.id}>
@@ -224,7 +358,17 @@ export function CurriculumWorkspace({
                 </Select>
               </Labeled>
               <Labeled label="درس">
-                <Select name="subjectId" required defaultValue="">
+                <Select
+                  name="subjectId"
+                  required
+                  value={draft.subjectId}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      subjectId: event.target.value,
+                    }))
+                  }
+                >
                   <option value="" disabled>
                     انتخاب درس
                   </option>
@@ -237,32 +381,96 @@ export function CurriculumWorkspace({
                     ))}
                 </Select>
               </Labeled>
-              <Labeled label="ساعت هر کلاس در هفته">
+              <Labeled
+                label="ساعت هر کلاس در هفته"
+                hint="با تغییر ساعت، الگوی پیشنهادی مدرسه دوباره محاسبه می‌شود."
+              >
                 <Input
                   name="weeklyHours"
+                  aria-label="ساعت هر کلاس در هفته"
                   inputMode="numeric"
                   min="1"
                   required
                   placeholder="۴"
+                  value={draft.weeklyHours}
+                  onChange={(event) => {
+                    const nextHours = event.target.value;
+                    const [defaultPattern] = suggestSessionPatterns(
+                      Number(normalizeDigits(nextHours)),
+                    );
+                    setDraft((current) => ({
+                      ...current,
+                      weeklyHours: nextHours,
+                      sessionPattern: defaultPattern
+                        ? patternValue(defaultPattern)
+                        : "",
+                    }));
+                  }}
                 />
               </Labeled>
-              <Labeled label="تعداد جلسات">
-                <Input
-                  name="sessionCount"
-                  inputMode="numeric"
-                  min="1"
-                  required
-                  placeholder="۲"
-                />
-              </Labeled>
-              <Labeled label="الگوی جلسات" hint="نمونه: ۲+۲ یا ۲+۱">
+              <Labeled
+                label="الگوی دقیق جلسات"
+                hint="مجموع اعداد باید با ساعت هفتگی برابر باشد؛ نمونه: ۲+۱."
+              >
                 <Input
                   name="sessionPattern"
+                  aria-label="الگوی دقیق جلسات"
                   dir="ltr"
                   required
-                  placeholder="2+2"
+                  placeholder="2+1"
+                  value={draft.sessionPattern}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      sessionPattern: event.target.value,
+                    }))
+                  }
                 />
               </Labeled>
+              <div className="curriculum-pattern-picker">
+                <div>
+                  <strong>نحوه برگزاری</strong>
+                  <small>
+                    پیش‌فرض مدرسه انتخاب شده است؛ در صورت نیاز فقط همین ردیف را
+                    پیوسته، ترکیبی یا خردشده کنید.
+                  </small>
+                </div>
+                {suggestedPatterns.length ? (
+                  <div className="curriculum-pattern-options" role="group" aria-label="انتخاب نحوه برگزاری">
+                    {suggestedPatterns.map((pattern) => {
+                      const value = patternValue(pattern);
+                      const selected =
+                        value === patternValue(parsedPattern);
+                      return (
+                        <button
+                          type="button"
+                          className="curriculum-pattern-option"
+                          aria-pressed={selected}
+                          key={value}
+                          onClick={() =>
+                            setDraft((current) => ({
+                              ...current,
+                              sessionPattern: value,
+                            }))
+                          }
+                        >
+                          <bdi>
+                            {pattern
+                              .map((part) => part.toLocaleString("fa-IR"))
+                              .join(" + ")}
+                          </bdi>
+                          <small>{describeSessionPattern(pattern)}</small>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="muted">
+                    ابتدا ساعت هفتگی را وارد کنید تا حالت‌های برگزاری نمایش داده
+                    شوند.
+                  </p>
+                )}
+              </div>
             </ManagedForm>
           ) : (
             <p className="inline-callout">
@@ -277,31 +485,118 @@ export function CurriculumWorkspace({
               <h2>برنامه درسی سال فعال</h2>
               <p>بار آموزشی هر ردیف بر اساس کلاس‌های فعال محاسبه می‌شود.</p>
             </div>
-            <Badge>{data.items.length.toLocaleString("fa-IR")} ردیف</Badge>
+            <Badge>
+              {visibleItems.length.toLocaleString("fa-IR")} از {" "}
+              {data.items.length.toLocaleString("fa-IR")} ردیف
+            </Badge>
           </div>
-          <div className="table-wrap">
+          {data.items.length ? (
+            <div className="curriculum-browser-controls">
+              <div
+                className="curriculum-grade-tabs"
+                role="tablist"
+                aria-label="انتخاب پایه تحصیلی"
+              >
+                {data.grades.map((grade) => {
+                  const itemCount = data.items.filter(
+                    (item) => item.gradeId === grade.id,
+                  ).length;
+                  const selected = grade.id === activeGradeId;
+                  return (
+                    <button
+                      type="button"
+                      role="tab"
+                      id={`curriculum-grade-tab-${grade.id}`}
+                      aria-controls="curriculum-grade-panel"
+                      aria-selected={selected}
+                      tabIndex={selected ? 0 : -1}
+                      className={selected ? "is-active" : undefined}
+                      key={grade.id}
+                      onClick={() => {
+                        setSelectedGradeId(grade.id);
+                        setSelectedMajorId("all");
+                      }}
+                    >
+                      <span>{grade.name.replace(/^پایه\s+/, "")}</span>
+                      <small>{itemCount.toLocaleString("fa-IR")} درس</small>
+                    </button>
+                  );
+                })}
+              </div>
+              <div
+                className="curriculum-major-filters"
+                role="group"
+                aria-label="فیلتر رشته"
+              >
+                <span>رشته</span>
+                <button
+                  type="button"
+                  className={activeMajorId === "all" ? "is-active" : undefined}
+                  aria-pressed={activeMajorId === "all"}
+                  onClick={() => setSelectedMajorId("all")}
+                >
+                  همه
+                  <small>{gradeItems.length.toLocaleString("fa-IR")}</small>
+                </button>
+                {availableMajors.map((major) => {
+                  const itemCount = gradeItems.filter(
+                    (item) => item.majorId === major.id || item.majorId === null,
+                  ).length;
+                  const selected = activeMajorId === major.id;
+                  return (
+                    <button
+                      type="button"
+                      className={selected ? "is-active" : undefined}
+                      aria-pressed={selected}
+                      key={major.id}
+                      onClick={() => setSelectedMajorId(major.id)}
+                    >
+                      {major.name}
+                      <small>{itemCount.toLocaleString("fa-IR")}</small>
+                    </button>
+                  );
+                })}
+                <p aria-live="polite">
+                  {visibleItems.length.toLocaleString("fa-IR")} درس در {" "}
+                  {activeGrade?.name ?? "پایه انتخاب‌شده"}
+                  {activeMajorId !== "all"
+                    ? ` · ${availableMajors.find((major) => major.id === activeMajorId)?.name ?? ""}`
+                    : ""}
+                </p>
+              </div>
+            </div>
+          ) : null}
+          <div
+            className="table-wrap"
+            id="curriculum-grade-panel"
+            role="tabpanel"
+            aria-label={activeGrade?.name ?? "برنامه درسی"}
+            aria-labelledby={
+              activeGradeId
+                ? `curriculum-grade-tab-${activeGradeId}`
+                : undefined
+            }
+          >
             <table>
               <thead>
                 <tr>
                   <th>درس</th>
-                  <th>پایه / رشته</th>
+                  <th>رشته</th>
                   <th>ساعات</th>
                   <th>جلسات</th>
                   <th>کلاس‌ها</th>
                   <th>بار کل</th>
+                  <th>تنظیم</th>
                 </tr>
               </thead>
               <tbody>
-                {data.items.map((item) => (
+                {visibleItems.map((item) => (
                   <tr key={item.id}>
                     <td>
                       <strong>{item.subjectName}</strong>
                     </td>
                     <td>
-                      {item.gradeName}
-                      {item.majorName
-                        ? ` · ${item.majorName}`
-                        : " · همه رشته‌ها"}
+                      {item.majorName ?? "همه رشته‌ها"}
                     </td>
                     <td>{item.weeklyHours.toLocaleString("fa-IR")}</td>
                     <td>
@@ -313,6 +608,9 @@ export function CurriculumWorkspace({
                       <span className="muted">
                         ({item.sessionCount.toLocaleString("fa-IR")} جلسه)
                       </span>
+                      <small className="curriculum-pattern-kind">
+                        {describeSessionPattern(item.sessionPattern)}
+                      </small>
                     </td>
                     <td>{item.classCount.toLocaleString("fa-IR")}</td>
                     <td>
@@ -320,14 +618,35 @@ export function CurriculumWorkspace({
                         {item.totalWorkload.toLocaleString("fa-IR")} ساعت
                       </strong>
                     </td>
+                    <td>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => editItem(item)}
+                        aria-label={`ویرایش الگوی ${item.subjectName} ${item.gradeName}${item.majorName ? ` ${item.majorName}` : ""}`}
+                      >
+                        <PencilLine size={15} />
+                        ویرایش
+                      </Button>
+                    </td>
                   </tr>
                 ))}
                 {!data.items.length ? (
                   <tr>
-                    <td colSpan={6}>
+                    <td colSpan={7}>
                       <div className="table-empty">
                         <BookMarked size={22} />
                         <span>هنوز ساعات درسی ثبت نشده است.</span>
+                      </div>
+                    </td>
+                  </tr>
+                ) : !visibleItems.length ? (
+                  <tr>
+                    <td colSpan={7}>
+                      <div className="table-empty">
+                        <BookMarked size={22} />
+                        <span>برای این پایه و رشته درسی ثبت نشده است.</span>
                       </div>
                     </td>
                   </tr>

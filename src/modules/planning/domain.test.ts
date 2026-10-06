@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateCurriculumWorkload, calculateSuggestedClassCount, distributeStudents, normalizeDigits, parseSessionPattern, validateAvailability, validateSessionPattern, validateWorkload } from "./domain";
+import { calculateCurriculumWorkload, calculateSuggestedClassCount, describeSessionPattern, distributeStudents, normalizeDigits, parseSessionPattern, suggestSessionPatterns, validateAvailability, validateSessionPattern, validateWorkload } from "./domain";
 
 describe("قواعد داده‌ورودی برنامه‌ریزی", () => {
   it("تعداد کلاس پیشنهادی را با گرد کردن رو به بالا محاسبه می‌کند", () => {
@@ -20,6 +20,14 @@ describe("قواعد داده‌ورودی برنامه‌ریزی", () => {
     expect(validateSessionPattern(4, 2, [2, 2])).toBeNull();
     expect(validateSessionPattern(4, 2, [3, 2])).toContain("مجموع");
     expect(validateSessionPattern(4, 3, [2, 2])).toContain("تعداد");
+  });
+
+  it("برای هر ساعت هفتگی حالت کامل، ترکیبی و خردشده پیشنهاد می‌دهد", () => {
+    expect(suggestSessionPatterns(2)).toEqual([[2], [1, 1]]);
+    expect(suggestSessionPatterns(3)).toEqual([[2, 1], [1, 1, 1]]);
+    expect(suggestSessionPatterns(4)).toEqual([[2, 2], [2, 1, 1], [1, 1, 1, 1]]);
+    expect(describeSessionPattern([2, 1])).toBe("ترکیب جلسه کامل و تک‌ساعت");
+    expect(suggestSessionPatterns(0)).toEqual([]);
   });
 
   it("workload curriculum را از تعداد کلاس محاسبه می‌کند", () => {

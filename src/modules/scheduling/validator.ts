@@ -1,5 +1,5 @@
 import type { ScheduleAssignment, SchedulingIssue, SchedulingProblem } from "./types";
-import { assignedHoursFor, expandSessions } from "./types";
+import { activeCycleWeeks, assignedHoursFor, compatibleWeekPatterns, expandSessions, normalizedWeekPattern } from "./types";
 
 function longestRun(positions: number[]) {
   const sorted = [...new Set(positions)].sort((a, b) => a - b);
@@ -35,7 +35,7 @@ export function validateSchedule(problem: SchedulingProblem, assignments: Schedu
   const teacherSubjectLoads = new Map<string, number>();
   const teacherDayPositions = new Map<string, number[]>();
   const classDayPositions = new Map<string, number[]>();
-  const curriculumDays = new Map<string, { dayId: string; sessionId: string }[]>();
+  const curriculumDays = new Map<string, { dayId: string; sessionId: string; week: "A" | "B" }[]>();
 
   for (const assignment of assignments) {
     const session = sessions.get(assignment.sessionId);
@@ -52,6 +52,9 @@ export function validateSchedule(problem: SchedulingProblem, assignments: Schedu
       issues.push({ code: "INVALID_TEACHER", severity: "ERROR", message: `دبیر انتخاب‌شده برای درس «${session.subjectName}» مجاز نیست.`, entityType: "session", entityId: session.id });
       continue;
     }
+    if (session.assignedTeacherId && teacher.id !== session.assignedTeacherId) {
+      issues.push({ code: "CLASS_TEACHER_MISMATCH", severity: "ERROR", message: `دبیر جلسه «${session.subjectName}» برای کلاس «${session.className}» با تخصیص قطعی مدرسه یکسان نیست.`, entityType: "session", entityId: session.id });
+    }
     if (assignment.classId !== session.classId || assignment.subjectId !== session.subjectId || assignment.curriculumId !== session.curriculumId) {
       issues.push({ code: "SESSION_REFERENCE_MISMATCH", severity: "ERROR", message: `اطلاعات جلسه «${session.subjectName}» با نیاز درسی کلاس مطابقت ندارد.`, entityType: "session", entityId: session.id });
     }
@@ -59,6 +62,7 @@ export function validateSchedule(problem: SchedulingProblem, assignments: Schedu
       issues.push({ code: "INVALID_SESSION_SLOT_COUNT", severity: "ERROR", message: `هر جلسه «${session.subjectName}» باید در یک زنگ مدرسه قرار گیرد.`, entityType: "session", entityId: session.id });
     }
     const selectedPeriods = assignment.periodIds.map((id) => periods.get(id));
+    const weekPattern = normalizedWeekPattern(assignment);
     const invalidSequence = selectedPeriods.some((period) => !period)
       || selectedPeriods.some((period) => period?.dayId !== assignment.dayId)
       || selectedPeriods.some((period, index) => index > 0 && period!.position !== selectedPeriods[index - 1]!.position + 1)
@@ -66,24 +70,30 @@ export function validateSchedule(problem: SchedulingProblem, assignments: Schedu
     if (invalidSequence) {
       issues.push({ code: "INVALID_PERIOD_SEQUENCE", severity: "ERROR", message: `زنگ‌های جلسه «${session.subjectName}» پیوسته و معتبر نیستند.`, entityType: "session", entityId: session.id });
     }
+    const selectedPeriod = selectedPeriods[0];
+    if (selectedPeriod && !compatibleWeekPatterns(session.workloadHours, selectedPeriod.instructionalUnits).includes(weekPattern)) {
+      issues.push({ code: "INCOMPATIBLE_PERIOD_CAPACITY", severity: "ERROR", message: `ظرفیت آموزشی «${selectedPeriod.label}» با جلسه ${session.workloadHours.toLocaleString("fa-IR")} ساعته «${session.subjectName}» سازگار نیست.`, entityType: "session", entityId: session.id });
+    }
 
     for (const periodId of assignment.periodIds) {
       const period = periods.get(periodId);
       if (!["AVAILABLE", "PREFERRED"].includes(teacher.availability[periodId])) {
         issues.push({ code: "OUTSIDE_AVAILABILITY", severity: "ERROR", message: `«${teacher.name}» در زمان انتخاب‌شده حضور ندارد.`, entityType: "session", entityId: session.id });
       }
-      const classKey = `${session.classId}:${periodId}`;
-      const teacherKey = `${teacher.id}:${periodId}`;
-      const conflictingClassSession = classSlots.get(classKey);
-      const conflictingTeacherSession = teacherSlots.get(teacherKey);
-      if (conflictingClassSession && conflictingClassSession !== session.id) {
-        issues.push({ code: "CLASS_CONFLICT", severity: "ERROR", message: `کلاس «${session.className}» در این زمان درس دیگری دارد.`, entityType: "session", entityId: session.id });
+      for (const week of activeCycleWeeks(weekPattern)) {
+        const classKey = `${session.classId}:${periodId}:${week}`;
+        const teacherKey = `${teacher.id}:${periodId}:${week}`;
+        const conflictingClassSession = classSlots.get(classKey);
+        const conflictingTeacherSession = teacherSlots.get(teacherKey);
+        if (conflictingClassSession && conflictingClassSession !== session.id) {
+          issues.push({ code: "CLASS_CONFLICT", severity: "ERROR", message: `کلاس «${session.className}» در این زمان و همین هفته درس دیگری دارد.`, entityType: "session", entityId: session.id });
+        }
+        if (conflictingTeacherSession && conflictingTeacherSession !== session.id) {
+          issues.push({ code: "TEACHER_CONFLICT", severity: "ERROR", message: `«${teacher.name}» در این زمان و همین هفته برای کلاس دیگری برنامه دارد.`, entityType: "session", entityId: session.id });
+        }
+        classSlots.set(classKey, session.id);
+        teacherSlots.set(teacherKey, session.id);
       }
-      if (conflictingTeacherSession && conflictingTeacherSession !== session.id) {
-        issues.push({ code: "TEACHER_CONFLICT", severity: "ERROR", message: `«${teacher.name}» در این زمان برای کلاس دیگری برنامه دارد.`, entityType: "session", entityId: session.id });
-      }
-      classSlots.set(classKey, session.id);
-      teacherSlots.set(teacherKey, session.id);
       if (period?.isLast) {
         issues.push({ code: "LAST_PERIOD", severity: "WARNING", message: `جلسه «${session.subjectName}» در زنگ پایانی ${period.dayLabel} قرار می‌گیرد.`, entityType: "session", entityId: session.id });
       }
@@ -92,12 +102,14 @@ export function validateSchedule(problem: SchedulingProblem, assignments: Schedu
     teacherLoads.set(teacher.id, (teacherLoads.get(teacher.id) ?? 0) + session.workloadHours);
     const teacherSubjectKey = `${teacher.id}:${session.subjectId}`;
     teacherSubjectLoads.set(teacherSubjectKey, (teacherSubjectLoads.get(teacherSubjectKey) ?? 0) + session.workloadHours);
-    const teacherDayKey = `${teacher.id}:${assignment.dayId}`;
-    const classDayKey = `${session.classId}:${assignment.dayId}`;
     const validPositions = selectedPeriods.filter(Boolean).map((period) => period!.position);
-    teacherDayPositions.set(teacherDayKey, [...(teacherDayPositions.get(teacherDayKey) ?? []), ...validPositions]);
-    classDayPositions.set(classDayKey, [...(classDayPositions.get(classDayKey) ?? []), ...validPositions]);
-    curriculumDays.set(session.curriculumId, [...(curriculumDays.get(session.curriculumId) ?? []), { dayId: assignment.dayId, sessionId: session.id }]);
+    for (const week of activeCycleWeeks(weekPattern)) {
+      const teacherDayKey = `${teacher.id}:${assignment.dayId}:${week}`;
+      const classDayKey = `${session.classId}:${assignment.dayId}:${week}`;
+      teacherDayPositions.set(teacherDayKey, [...(teacherDayPositions.get(teacherDayKey) ?? []), ...validPositions]);
+      classDayPositions.set(classDayKey, [...(classDayPositions.get(classDayKey) ?? []), ...validPositions]);
+      curriculumDays.set(session.curriculumId, [...(curriculumDays.get(session.curriculumId) ?? []), { dayId: assignment.dayId, sessionId: session.id, week }]);
+    }
   }
 
   for (const session of sessions.values()) {
@@ -141,10 +153,10 @@ export function validateSchedule(problem: SchedulingProblem, assignments: Schedu
 
   for (const placements of curriculumDays.values()) {
     const dayCounts = new Map<string, number>();
-    for (const placement of placements) dayCounts.set(placement.dayId, (dayCounts.get(placement.dayId) ?? 0) + 1);
+    for (const placement of placements) { const key = `${placement.dayId}:${placement.week}`; dayCounts.set(key, (dayCounts.get(key) ?? 0) + 1); }
     if ([...dayCounts.values()].some((count) => count > 1)) {
       for (const placement of placements) {
-        if ((dayCounts.get(placement.dayId) ?? 0) > 1) {
+        if ((dayCounts.get(`${placement.dayId}:${placement.week}`) ?? 0) > 1) {
           issues.push({ code: "SUBJECT_SAME_DAY", severity: "WARNING", message: "دو جلسه از یک درس در یک روز قرار گرفته‌اند.", entityType: "session", entityId: placement.sessionId });
         }
       }

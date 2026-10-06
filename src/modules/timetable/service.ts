@@ -19,6 +19,7 @@ const editSchema = z.discriminatedUnion("kind", [
     teacherId: id,
     dayId: id,
     startPosition: z.number().int().positive(),
+    weekPattern: z.enum(["EVERY_WEEK", "WEEK_A", "WEEK_B"]).optional(),
     confirmWarnings: z.boolean().default(false),
   }),
   z.object({

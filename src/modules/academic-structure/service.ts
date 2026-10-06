@@ -38,7 +38,7 @@ const timelineSchema = z.object({
   endTime: clock,
   periodCount: z.number().int().min(1).max(20),
   defaultBreakMinutes: z.number().int().min(0).max(180),
-  periods: z.array(z.object({ position: z.number().int().min(1).max(20), label: name("عنوان زنگ", 32), startTime: clock, endTime: clock })).min(1).max(20),
+  periods: z.array(z.object({ position: z.number().int().min(1).max(20), label: name("عنوان زنگ", 32), startTime: clock, endTime: clock, instructionalUnits: z.number().int().min(1).max(4) })).min(1).max(20),
   intermissions: z.array(z.object({ afterPeriodPosition: z.number().int().min(1).max(19), kind: z.enum(["BREAK", "TRANSITION"]), startTime: clock, endTime: clock })).max(19),
 });
 

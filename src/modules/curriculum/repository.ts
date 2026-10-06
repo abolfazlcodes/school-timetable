@@ -2,7 +2,7 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import type { PgDatabase } from "drizzle-orm/pg-core";
 import type { PgQueryResultHKT } from "drizzle-orm/pg-core/session";
 import * as schema from "@/db/schema";
-import { academicYears, classGroups, curriculumItems, grades, majors, subjects, teacherSubjectAssignments } from "@/db/schema";
+import { academicYears, classGroups, curriculumItems, grades, majors, subjects, teachers, teacherSubjectAssignments } from "@/db/schema";
 import type { TenantContext } from "@/modules/tenancy/types";
 
 export interface SubjectView { id: string; name: string; code: string | null; isActive: boolean }
@@ -60,10 +60,13 @@ export function createCurriculumRepository<TQueryResult extends PgQueryResultHKT
           .innerJoin(grades, and(eq(grades.id, curriculumItems.gradeId), eq(grades.schoolId, context.schoolId)))
           .innerJoin(subjects, and(eq(subjects.id, curriculumItems.subjectId), eq(subjects.schoolId, context.schoolId)))
           .leftJoin(majors, and(eq(majors.id, curriculumItems.majorId), eq(majors.schoolId, context.schoolId)))
-          .where(and(eq(curriculumItems.schoolId, context.schoolId), eq(curriculumItems.academicYearId, activeYear.id)))
+          .where(and(eq(curriculumItems.schoolId, context.schoolId), eq(curriculumItems.academicYearId, activeYear.id), eq(curriculumItems.isActive, true), eq(subjects.isActive, true)))
           .orderBy(asc(grades.sortOrder), asc(subjects.name)),
         db.select({ gradeId: classGroups.gradeId, majorId: classGroups.majorId }).from(classGroups).where(and(eq(classGroups.schoolId, context.schoolId), eq(classGroups.academicYearId, activeYear.id), eq(classGroups.isActive, true))),
-        db.select({ subjectId: teacherSubjectAssignments.subjectId, assignedWeeklyHours: teacherSubjectAssignments.assignedWeeklyHours }).from(teacherSubjectAssignments).where(and(eq(teacherSubjectAssignments.schoolId, context.schoolId), eq(teacherSubjectAssignments.academicYearId, activeYear.id))),
+        db.select({ subjectId: teacherSubjectAssignments.subjectId, assignedWeeklyHours: teacherSubjectAssignments.assignedWeeklyHours })
+          .from(teacherSubjectAssignments)
+          .innerJoin(teachers, and(eq(teachers.id, teacherSubjectAssignments.teacherId), eq(teachers.schoolId, context.schoolId), eq(teachers.isActive, true)))
+          .where(and(eq(teacherSubjectAssignments.schoolId, context.schoolId), eq(teacherSubjectAssignments.academicYearId, activeYear.id))),
       ]);
       const items = itemRows.map((item) => {
         const classCount = classes.filter((group) => group.gradeId === item.gradeId && (item.majorId === null || group.majorId === item.majorId)).length;

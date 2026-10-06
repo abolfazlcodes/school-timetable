@@ -1,4 +1,4 @@
-import { assignedHoursFor, expandSessions, type ScheduleAssignment, type SchedulingIssue, type SchedulingProblem } from "@/modules/scheduling/types";
+import { assignedHoursFor, compatibleWeekPatterns, expandSessions, type ScheduleAssignment, type SchedulingIssue, type SchedulingProblem, type WeekPattern } from "@/modules/scheduling/types";
 import { validateSchedule, validationIssueKey } from "@/modules/scheduling/validator";
 
 export class TimetableEditError extends Error {
@@ -13,6 +13,7 @@ export interface PlacementInput {
   teacherId: string;
   dayId: string;
   startPosition: number;
+  weekPattern?: WeekPattern;
 }
 
 export interface EvaluatedChange {
@@ -29,6 +30,7 @@ function sortAssignments(assignments: ScheduleAssignment[]) {
 export function placeSession(problem: SchedulingProblem, assignments: ScheduleAssignment[], input: PlacementInput) {
   const session = expandSessions(problem).find((item) => item.id === input.sessionId);
   if (!session) throw new TimetableEditError("جلسه انتخاب‌شده در نیازهای درسی این سال وجود ندارد.");
+  if (session.assignedTeacherId && session.assignedTeacherId !== input.teacherId) throw new TimetableEditError("این درس برای این کلاس به دبیر دیگری تخصیص قطعی داده شده است.");
   const teacher = problem.teachers.find((item) => item.id === input.teacherId && assignedHoursFor(item, session.subjectId) > 0);
   if (!teacher) throw new TimetableEditError("دبیر انتخاب‌شده مجاز به تدریس این درس نیست.");
   const dayPeriods = problem.periods
@@ -37,6 +39,9 @@ export function placeSession(problem: SchedulingProblem, assignments: ScheduleAs
   const startIndex = dayPeriods.findIndex((period) => period.position === input.startPosition);
   const selectedPeriods = startIndex < 0 ? [] : [dayPeriods[startIndex]];
   if (!selectedPeriods.length) throw new TimetableEditError("زنگ انتخاب‌شده در روز موردنظر وجود ندارد.");
+  const compatiblePatterns = compatibleWeekPatterns(session.workloadHours, selectedPeriods[0].instructionalUnits);
+  const weekPattern = input.weekPattern ?? compatiblePatterns[0];
+  if (!weekPattern || !compatiblePatterns.includes(weekPattern)) throw new TimetableEditError("ظرفیت آموزشی زنگ انتخاب‌شده با مدت این جلسه سازگار نیست.");
   const next: ScheduleAssignment = {
     sessionId: session.id,
     curriculumId: session.curriculumId,
@@ -46,6 +51,7 @@ export function placeSession(problem: SchedulingProblem, assignments: ScheduleAs
     dayId: input.dayId,
     startPosition: input.startPosition,
     periodIds: selectedPeriods.map((period) => period.id),
+    weekPattern,
   };
   return sortAssignments([...assignments.filter((item) => item.sessionId !== input.sessionId), next]);
 }
@@ -59,8 +65,8 @@ export function swapSessions(problem: SchedulingProblem, assignments: ScheduleAs
   const secondRequirement = sessions.get(secondSessionId);
   if (!first || !second || !firstRequirement || !secondRequirement) throw new TimetableEditError("یکی از جلسات انتخاب‌شده در جدول قرار ندارد.");
   return sortAssignments(assignments.map((assignment) => {
-    if (assignment.sessionId === firstSessionId) return { ...assignment, dayId: second.dayId, startPosition: second.startPosition, periodIds: [...second.periodIds] };
-    if (assignment.sessionId === secondSessionId) return { ...assignment, dayId: first.dayId, startPosition: first.startPosition, periodIds: [...first.periodIds] };
+    if (assignment.sessionId === firstSessionId) return { ...assignment, dayId: second.dayId, startPosition: second.startPosition, periodIds: [...second.periodIds], weekPattern: second.weekPattern };
+    if (assignment.sessionId === secondSessionId) return { ...assignment, dayId: first.dayId, startPosition: first.startPosition, periodIds: [...first.periodIds], weekPattern: first.weekPattern };
     return assignment;
   }));
 }

@@ -6,6 +6,7 @@ export interface TimelinePeriod {
   label: string;
   startTime: string;
   endTime: string;
+  instructionalUnits: number;
 }
 
 export interface TimelineIntermission {
@@ -30,6 +31,7 @@ export interface AutomaticTimelineInput {
   endTime: string;
   periodCount: number;
   defaultBreakMinutes: number;
+  instructionalUnits?: number[];
   intermissions?: { afterPeriodPosition: number; durationMinutes: number; kind?: IntermissionKind }[];
 }
 
@@ -53,6 +55,12 @@ export function minutesToClock(value: number): string {
 
 export function intervalDuration(startTime: string, endTime: string): number {
   return clockToMinutes(endTime) - clockToMinutes(startTime);
+}
+
+/** پیشنهاد اولیه است و مدیر مدرسه می‌تواند آن را برای هر زنگ تغییر دهد. */
+export function suggestedInstructionalUnits(durationMinutes: number): number {
+  if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) return 1;
+  return Math.min(4, Math.max(1, Math.round(durationMinutes / 45)));
 }
 
 export function calculateAutomaticTimeline(input: AutomaticTimelineInput): SchoolDayTimeline {
@@ -86,7 +94,13 @@ export function calculateAutomaticTimeline(input: AutomaticTimelineInput): Schoo
     const position = index + 1;
     const duration = baseDuration + (index < extraMinutes ? 1 : 0);
     const periodEnd = cursor + duration;
-    periods.push({ position, label: `زنگ ${position.toLocaleString("fa-IR")}`, startTime: minutesToClock(cursor), endTime: minutesToClock(periodEnd) });
+    periods.push({
+      position,
+      label: `زنگ ${position.toLocaleString("fa-IR")}`,
+      startTime: minutesToClock(cursor),
+      endTime: minutesToClock(periodEnd),
+      instructionalUnits: input.instructionalUnits?.[index] ?? suggestedInstructionalUnits(duration),
+    });
     cursor = periodEnd;
     const boundary = boundaryDurations.get(position);
     if (position < input.periodCount && boundary?.durationMinutes) {
@@ -127,6 +141,7 @@ export function validateSchoolDayTimeline(timeline: SchoolDayTimeline): string[]
     const end = clockToMinutes(period.endTime);
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) errors.push(`${period.label || `زنگ ${period.position}`} مدت معتبر ندارد.`);
     else if (start < schoolStart || end > schoolEnd) errors.push(`${period.label || `زنگ ${period.position}`} خارج از ساعات مدرسه است.`);
+    if (!Number.isInteger(period.instructionalUnits) || period.instructionalUnits < 1 || period.instructionalUnits > 4) errors.push(`${period.label || `زنگ ${period.position}`} باید بین ۱ تا ۴ واحد آموزشی داشته باشد.`);
   }
 
   const breaks = new Map<number, TimelineIntermission>();

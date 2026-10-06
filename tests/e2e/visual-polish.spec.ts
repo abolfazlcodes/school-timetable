@@ -33,6 +33,8 @@ test("پیکربندی فشرده ساعات، timeline دستی و محاسبه
   await expect(saturday.getByText("زنگ تفریح · ۱۰ دقیقه")).toBeVisible();
   await expect(saturday.getByText("زنگ تفریح · ۱۵ دقیقه")).toBeVisible();
   await expect(saturday.getByText("جابه‌جایی · ۵ دقیقه")).toBeVisible();
+  await expect(saturday.getByLabel("واحد آموزشی زنگ ۱ شنبه")).toHaveValue("2");
+  await expect(saturday.getByLabel("واحد آموزشی زنگ ۴ شنبه")).toHaveValue("1");
   await saturday.getByRole("button", { name: "ذخیره برنامه این روز" }).click();
   await expect(saturday.getByText("برنامه زنگ‌های این روز ذخیره شد.")).toBeVisible();
 

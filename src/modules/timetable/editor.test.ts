@@ -42,4 +42,14 @@ describe("ویرایش مستقل برنامه هفتگی", () => {
     const unequalSwap = swapSessions(unequalProblem, assignments, "r1:1", "r2:1");
     expect(unequalSwap.find((item) => item.sessionId === "r1:1")?.periodIds).toEqual(["sa-2"]);
   });
+
+  it("جلسه یک‌ساعته را در زنگ دوواحدی با نوبت هفته اول یا دوم جایگذاری می‌کند", () => {
+    const problem = makeProblem();
+    problem.periods[0] = { ...problem.periods[0], instructionalUnits: 2 };
+    problem.curriculum[0] = { ...problem.curriculum[0], weeklyHours: 2, sessionPattern: [1, 1] };
+    const first = placeSession(problem, [], { sessionId: "r1:1", teacherId: "t1", dayId: "sat", startPosition: 1, weekPattern: "WEEK_A" });
+    const both = placeSession(problem, first, { sessionId: "r1:2", teacherId: "t1", dayId: "sat", startPosition: 1, weekPattern: "WEEK_B" });
+    expect(both.map((item) => item.weekPattern)).toEqual(["WEEK_A", "WEEK_B"]);
+    expect(evaluateChange(problem, [], both).issues.some((issue) => issue.code === "TEACHER_CONFLICT")).toBe(false);
+  });
 });

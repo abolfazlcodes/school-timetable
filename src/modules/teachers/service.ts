@@ -13,11 +13,10 @@ import type { TeacherRepository } from "./repository";
 
 const uuid = z.string().uuid("شناسه انتخاب‌شده معتبر نیست.");
 const teacherFields = {
-  firstName: z.string().trim().min(2, "نام باید حداقل ۲ نویسه باشد.").max(60),
+  firstName: z.string().trim().max(60),
   lastName: z
     .string()
     .trim()
-    .min(2, "نام خانوادگی باید حداقل ۲ نویسه باشد.")
     .max(80),
   personnelCode: z.string().trim().min(2, "کد پرسنلی لازم است.").max(32),
   employmentType: z.enum(["FULL_TIME", "PART_TIME", "CONTRACT"], {
@@ -40,12 +39,17 @@ const teacherFields = {
     .max(1000, "یادداشت بیش از حد طولانی است.")
     .transform((value) => value || null),
 };
-const createSchema = z.object(teacherFields);
+function validateTeacherName(value: { firstName: string; lastName: string }, context: z.RefinementCtx) {
+  if (value.firstName.length > 0 && value.firstName.length < 2) context.addIssue({ code: "custom", path: ["firstName"], message: "نام باید حداقل ۲ نویسه باشد." });
+  if (value.lastName.length > 0 && value.lastName.length < 2) context.addIssue({ code: "custom", path: ["lastName"], message: "نام خانوادگی باید حداقل ۲ نویسه باشد." });
+  if (!value.firstName.length && !value.lastName.length) context.addIssue({ code: "custom", path: ["lastName"], message: "حداقل نام یا نام خانوادگی را وارد کنید." });
+}
+const createSchema = z.object(teacherFields).superRefine(validateTeacherName);
 const updateSchema = z.object({
   teacherId: uuid,
   ...teacherFields,
   isActive: z.boolean(),
-});
+}).superRefine(validateTeacherName);
 const subjectAssignmentSchema = z.object({
   teacherId: uuid,
   academicYearId: uuid,

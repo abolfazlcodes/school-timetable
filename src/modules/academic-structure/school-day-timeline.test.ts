@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateAutomaticTimeline, intervalDuration, validateSchoolDayTimeline, type SchoolDayTimeline } from "./school-day-timeline";
+import { calculateAutomaticTimeline, intervalDuration, suggestedInstructionalUnits, validateSchoolDayTimeline, type SchoolDayTimeline } from "./school-day-timeline";
 
 function manualExample(): SchoolDayTimeline {
   return {
@@ -9,10 +9,10 @@ function manualExample(): SchoolDayTimeline {
     periodCount: 4,
     defaultBreakMinutes: 10,
     periods: [
-      { position: 1, label: "زنگ ۱", startTime: "08:00", endTime: "09:15" },
-      { position: 2, label: "زنگ ۲", startTime: "09:25", endTime: "10:45" },
-      { position: 3, label: "زنگ ۳", startTime: "11:00", endTime: "12:25" },
-      { position: 4, label: "زنگ ۴", startTime: "12:30", endTime: "13:20" },
+      { position: 1, label: "زنگ ۱", startTime: "08:00", endTime: "09:15", instructionalUnits: 2 },
+      { position: 2, label: "زنگ ۲", startTime: "09:25", endTime: "10:45", instructionalUnits: 2 },
+      { position: 3, label: "زنگ ۳", startTime: "11:00", endTime: "12:25", instructionalUnits: 2 },
+      { position: 4, label: "زنگ ۴", startTime: "12:30", endTime: "13:20", instructionalUnits: 1 },
     ],
     intermissions: [
       { afterPeriodPosition: 1, kind: "BREAK", startTime: "09:15", endTime: "09:25" },
@@ -30,6 +30,17 @@ describe("خط زمانی روز مدرسه", () => {
     expect(timeline.intermissions.map((item) => intervalDuration(item.startTime, item.endTime))).toEqual([10, 10, 10]);
     expect(new Set(timeline.periods.map((period) => intervalDuration(period.startTime, period.endTime))).size).toBeGreaterThan(1);
     expect(validateSchoolDayTimeline(timeline)).toEqual([]);
+  });
+
+  it("واحد آموزشی هر زنگ را مستقل از ساعت واقعی و قابل تنظیم نگه می‌دارد", () => {
+    const timeline = calculateAutomaticTimeline({ startTime: "08:00", endTime: "13:20", periodCount: 4, defaultBreakMinutes: 10, instructionalUnits: [2, 2, 2, 1] });
+    expect(timeline.periods.map((period) => period.instructionalUnits)).toEqual([2, 2, 2, 1]);
+    expect(validateSchoolDayTimeline(timeline)).toEqual([]);
+  });
+
+  it("قاعده دبیرستان را برای ۴۵ تا ۹۰ دقیقه به واحد آموزشی درست تبدیل می‌کند", () => {
+    expect([45, 50].map(suggestedInstructionalUnits)).toEqual([1, 1]);
+    expect([75, 80, 85, 90].map(suggestedInstructionalUnits)).toEqual([2, 2, 2, 2]);
   });
 
   it("استراحت‌های متغیر، جابه‌جایی و نبود فاصله را در محاسبه خودکار می‌پذیرد", () => {

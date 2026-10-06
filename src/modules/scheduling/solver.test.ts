@@ -3,21 +3,21 @@ import { makeProblem } from "./fixtures.test-helper";
 import { scoreSchedule, solveSchedule } from "./solver";
 import { validateSchedule } from "./validator";
 
-describe("موتور قطعی CSP", () => {
-  it("همه ساعات و تعداد جلسات را بدون conflict زمان‌بندی می‌کند", () => {
-    const problem = makeProblem(); const result = solveSchedule(problem, { maxCandidates: 3, nodeBudget: 20_000, timeBudgetMs: 1_000 });
+describe("موتور قیود CP-SAT", () => {
+  it("همه ساعات و تعداد جلسات را بدون conflict زمان‌بندی می‌کند", async () => {
+    const problem = makeProblem(); const result = await solveSchedule(problem, { maxCandidates: 3, nodeBudget: 20_000, timeBudgetMs: 1_000 });
     expect(result.status).toBe("SUCCEEDED"); expect(result.candidates.length).toBeGreaterThanOrEqual(2);
     expect(result.candidates[0].assignments).toHaveLength(4);
     expect(validateSchedule(problem, result.candidates[0].assignments).filter((issue) => issue.severity === "ERROR")).toEqual([]);
   });
 
-  it("برای ورودی یکسان نتیجه و ترتیب یکسان می‌دهد", () => {
-    const problem = makeProblem(); const first = solveSchedule(problem, { nodeBudget: 20_000, timeBudgetMs: 5_000 }); const second = solveSchedule(problem, { nodeBudget: 20_000, timeBudgetMs: 5_000 });
+  it("برای ورودی یکسان نتیجه و ترتیب یکسان می‌دهد", async () => {
+    const problem = makeProblem(); const first = await solveSchedule(problem, { nodeBudget: 20_000, timeBudgetMs: 5_000 }); const second = await solveSchedule(problem, { nodeBudget: 20_000, timeBudgetMs: 5_000 });
     expect(first.candidates.map((item) => item.signature)).toEqual(second.candidates.map((item) => item.signature));
     expect(first.candidates.map((item) => item.score)).toEqual(second.candidates.map((item) => item.score));
   });
 
-  it("با زمان واقعی و مدت‌های نابرابر زنگ‌ها همان قیود slot را حفظ می‌کند", () => {
+  it("با زمان واقعی و مدت‌های نابرابر زنگ‌ها همان قیود slot را حفظ می‌کند", async () => {
     const original = makeProblem();
     const customTimes = makeProblem({
       periods: makeProblem().periods.map((period) => {
@@ -25,11 +25,26 @@ describe("موتور قطعی CSP", () => {
         return { ...period, startTime: times[0], endTime: times[1] };
       }),
     });
-    const first = solveSchedule(original, { maxCandidates: 1, nodeBudget: 20_000, timeBudgetMs: 1_000 });
-    const second = solveSchedule(customTimes, { maxCandidates: 1, nodeBudget: 20_000, timeBudgetMs: 1_000 });
+    const first = await solveSchedule(original, { maxCandidates: 1, nodeBudget: 20_000, timeBudgetMs: 1_000 });
+    const second = await solveSchedule(customTimes, { maxCandidates: 1, nodeBudget: 20_000, timeBudgetMs: 1_000 });
     expect(second.status).toBe("SUCCEEDED");
     expect(second.candidates[0].signature).toBe(first.candidates[0].signature);
     expect(validateSchedule(customTimes, second.candidates[0].assignments).filter((issue) => issue.severity === "ERROR")).toEqual([]);
+  });
+
+  it("دو جلسه یک‌ساعته را در هفته‌های متفاوت یک زنگ دوساعته قرار می‌دهد", async () => {
+    const base = makeProblem();
+    const period = { ...base.periods[0], instructionalUnits: 2, isLast: true };
+    const problem = makeProblem({
+      periods: [period],
+      curriculum: base.curriculum.map((item) => ({ ...item, weeklyHours: 1, sessionPattern: [1] })),
+      teachers: [{ ...base.teachers[0], requiredWorkload: 2, subjectAssignments: [{ subjectId: "math", assignedWeeklyHours: 2 }], dailyMaximum: 1, availability: { [period.id]: "AVAILABLE" } }],
+    });
+    const result = await solveSchedule(problem, { maxCandidates: 1, nodeBudget: 2_000, timeBudgetMs: 1_000 });
+    expect(result.status).toBe("SUCCEEDED");
+    expect(new Set(result.candidates[0].assignments.map((item) => item.weekPattern))).toEqual(new Set(["WEEK_A", "WEEK_B"]));
+    expect(result.candidates[0].assignments.every((item) => item.periodIds[0] === period.id)).toBe(true);
+    expect(validateSchedule(problem, result.candidates[0].assignments).filter((issue) => issue.severity === "ERROR")).toEqual([]);
   });
 
   it("availability و تداخل دبیر و کلاس را validator مستقل رد می‌کند", () => {
@@ -43,9 +58,9 @@ describe("موتور قطعی CSP", () => {
     expect(validateSchedule(problem, assignments).map((issue) => issue.code)).toContain("OUTSIDE_AVAILABILITY");
   });
 
-  it("سقف workload را hard نگه می‌دارد و no-solution معتبر برمی‌گرداند", () => {
+  it("سقف workload را hard نگه می‌دارد و no-solution معتبر برمی‌گرداند", async () => {
     const problem = makeProblem(); problem.teachers[0] = { ...problem.teachers[0], maximumWorkload: 2, overtimeAllowance: 0 };
-    const result = solveSchedule(problem, { nodeBudget: 20_000, timeBudgetMs: 1_000 });
+    const result = await solveSchedule(problem, { nodeBudget: 20_000, timeBudgetMs: 1_000 });
     expect(result.status).toBe("NO_SOLUTION"); expect(result.candidates).toEqual([]); expect(result.issues[0].severity).toBe("ERROR");
   });
 

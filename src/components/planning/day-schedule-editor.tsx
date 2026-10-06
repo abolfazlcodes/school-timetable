@@ -36,7 +36,7 @@ function initialTimeline(day: SchoolDayView): SchoolDayTimeline {
       endTime: normalizeClockTime(periods.at(-1)!.endTime),
       periodCount: periods.length,
       defaultBreakMinutes: 10,
-      periods: periods.map(({ position, label, startTime, endTime }) => ({ position, label, startTime: normalizeClockTime(startTime), endTime: normalizeClockTime(endTime) })),
+      periods: periods.map(({ position, label, startTime, endTime, instructionalUnits }) => ({ position, label, startTime: normalizeClockTime(startTime), endTime: normalizeClockTime(endTime), instructionalUnits })),
       intermissions: periods.slice(0, -1).flatMap((period, index) => {
         const next = periods[index + 1];
         if (normalizeClockTime(period.endTime) === normalizeClockTime(next.startTime)) return [];
@@ -72,6 +72,7 @@ export function DayScheduleEditor({ day, academicYearId }: { day: SchoolDayView;
   const [endTime, setEndTime] = useState(initial.endTime);
   const [periodCount, setPeriodCount] = useState(initial.periodCount);
   const [defaultBreakMinutes, setDefaultBreakMinutes] = useState(initial.defaultBreakMinutes);
+  const [instructionalUnits, setInstructionalUnits] = useState<Record<number, number>>(() => Object.fromEntries(initial.periods.map((period) => [period.position, period.instructionalUnits])));
   const [boundaryRules, setBoundaryRules] = useState<Record<number, BoundaryRule>>(() => boundaryRulesFrom(initial));
   const [manualPeriods, setManualPeriods] = useState<TimelinePeriod[]>(initial.periods);
   const [manualIntermissions, setManualIntermissions] = useState<TimelineIntermission[]>(initial.intermissions);
@@ -84,6 +85,7 @@ export function DayScheduleEditor({ day, academicYearId }: { day: SchoolDayView;
           endTime,
           periodCount,
           defaultBreakMinutes,
+          instructionalUnits: Array.from({ length: periodCount }, (_, index) => instructionalUnits[index + 1]),
           intermissions: Array.from({ length: Math.max(0, periodCount - 1) }, (_, index) => {
             const position = index + 1;
             const rule = boundaryRules[position] ?? { durationMinutes: defaultBreakMinutes, kind: "BREAK" as const };
@@ -95,7 +97,7 @@ export function DayScheduleEditor({ day, academicYearId }: { day: SchoolDayView;
     } catch (error) {
       return { timeline: null, error: error instanceof Error ? error.message : "محاسبه برنامه زنگ‌ها ممکن نیست." };
     }
-  }, [boundaryRules, defaultBreakMinutes, endTime, periodCount, startTime]);
+  }, [boundaryRules, defaultBreakMinutes, endTime, instructionalUnits, periodCount, startTime]);
 
   const manualTimeline: SchoolDayTimeline = { mode: "MANUAL", startTime, endTime, periodCount, defaultBreakMinutes, periods: manualPeriods, intermissions: manualIntermissions };
   const effectiveTimeline = mode === "AUTO" ? automatic.timeline : manualTimeline;
@@ -123,6 +125,7 @@ export function DayScheduleEditor({ day, academicYearId }: { day: SchoolDayView;
         endTime,
         periodCount: safeCount,
         defaultBreakMinutes,
+        instructionalUnits: Array.from({ length: safeCount }, (_, index) => instructionalUnits[index + 1]),
         intermissions: Array.from({ length: Math.max(0, safeCount - 1) }, (_, index) => {
           const position = index + 1;
           const rule = boundaryRules[position] ?? { durationMinutes: defaultBreakMinutes, kind: "BREAK" as const };
@@ -130,6 +133,7 @@ export function DayScheduleEditor({ day, academicYearId }: { day: SchoolDayView;
         }),
       });
       setManualPeriods(recalculated.periods);
+      setInstructionalUnits(Object.fromEntries(recalculated.periods.map((period) => [period.position, period.instructionalUnits])));
       setManualIntermissions(recalculated.intermissions);
     } catch {
       // The inline timeline validation explains invalid bounds without discarding manual values.
@@ -174,7 +178,7 @@ export function DayScheduleEditor({ day, academicYearId }: { day: SchoolDayView;
         </div>
 
         <div className="period-timeline" aria-label={`برنامه زنگ‌های ${day.label}`}>
-          <div className="period-timeline__head"><span>زنگ</span><span>شروع</span><span>پایان</span><span>مدت</span></div>
+          <div className="period-timeline__head"><span>زنگ</span><span>شروع</span><span>پایان</span><span>مدت</span><span>واحد آموزشی</span></div>
           {shownPeriods.map((period) => {
             const pause = shownIntermissions.find((item) => item.afterPeriodPosition === period.position);
             const rule = boundaryRules[period.position] ?? { durationMinutes: defaultBreakMinutes, kind: "BREAK" as const };
@@ -184,6 +188,17 @@ export function DayScheduleEditor({ day, academicYearId }: { day: SchoolDayView;
                 {mode === "MANUAL" ? <ClockInput value={normalizeClockTime(period.startTime)} onChange={(event) => updateManualPeriod(period.position, { startTime: event.target.value })} aria-label={`شروع زنگ ${period.position.toLocaleString("fa-IR")} ${day.label}`} /> : <bdi>{normalizeClockTime(period.startTime)}</bdi>}
                 {mode === "MANUAL" ? <ClockInput value={normalizeClockTime(period.endTime)} onChange={(event) => updateManualPeriod(period.position, { endTime: event.target.value })} aria-label={`پایان زنگ ${period.position.toLocaleString("fa-IR")} ${day.label}`} /> : <bdi>{normalizeClockTime(period.endTime)}</bdi>}
                 <span>{intervalDuration(period.startTime, period.endTime).toLocaleString("fa-IR")} دقیقه</span>
+                <Select
+                  value={period.instructionalUnits}
+                  onChange={(event) => {
+                    const value = Number(event.target.value);
+                    setInstructionalUnits((current) => ({ ...current, [period.position]: value }));
+                    if (mode === "MANUAL") updateManualPeriod(period.position, { instructionalUnits: value });
+                  }}
+                  aria-label={`واحد آموزشی زنگ ${period.position.toLocaleString("fa-IR")} ${day.label}`}
+                >
+                  {[1, 2, 3, 4].map((value) => <option key={value} value={value}>{value.toLocaleString("fa-IR")} ساعت</option>)}
+                </Select>
               </div>
               {period.position < periodCount ? <div className="period-timeline__break">
                 {mode === "AUTO" ? <><Select value={rule.durationMinutes ? rule.kind : "NONE"} onChange={(event) => updateBoundary(period.position, event.target.value === "NONE" ? { durationMinutes: 0 } : { kind: event.target.value as IntermissionKind, durationMinutes: rule.durationMinutes || (event.target.value === "BREAK" ? defaultBreakMinutes : 5) })} aria-label={`نوع فاصله پس از زنگ ${period.position.toLocaleString("fa-IR")} ${day.label}`}><option value="NONE">بدون فاصله</option><option value="BREAK">زنگ تفریح</option><option value="TRANSITION">جابه‌جایی کلاس</option></Select>{rule.durationMinutes ? <Input type="number" min="1" max="180" value={rule.durationMinutes} onChange={(event) => updateBoundary(period.position, { durationMinutes: Number(event.target.value) })} aria-label={`مدت فاصله پس از زنگ ${period.position.toLocaleString("fa-IR")} ${day.label}`} /> : null}<span>{intermissionLabel(pause)}</span></> : (() => {

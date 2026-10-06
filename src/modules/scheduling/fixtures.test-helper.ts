@@ -2,12 +2,12 @@ import type { SchedulingProblem } from "./types";
 
 export function makeProblem(overrides: Partial<SchedulingProblem> = {}): SchedulingProblem {
   const periods = [
-    { id: "sa-1", dayId: "sat", dayLabel: "شنبه", dayOrder: 0, position: 1, label: "زنگ ۱", startTime: "07:30", endTime: "08:15", isLast: false },
-    { id: "sa-2", dayId: "sat", dayLabel: "شنبه", dayOrder: 0, position: 2, label: "زنگ ۲", startTime: "08:20", endTime: "09:05", isLast: false },
-    { id: "sa-3", dayId: "sat", dayLabel: "شنبه", dayOrder: 0, position: 3, label: "زنگ ۳", startTime: "09:10", endTime: "09:55", isLast: true },
-    { id: "su-1", dayId: "sun", dayLabel: "یکشنبه", dayOrder: 1, position: 1, label: "زنگ ۱", startTime: "07:30", endTime: "08:15", isLast: false },
-    { id: "su-2", dayId: "sun", dayLabel: "یکشنبه", dayOrder: 1, position: 2, label: "زنگ ۲", startTime: "08:20", endTime: "09:05", isLast: false },
-    { id: "su-3", dayId: "sun", dayLabel: "یکشنبه", dayOrder: 1, position: 3, label: "زنگ ۳", startTime: "09:10", endTime: "09:55", isLast: true },
+    { id: "sa-1", dayId: "sat", dayLabel: "شنبه", dayOrder: 0, position: 1, label: "زنگ ۱", startTime: "07:30", endTime: "08:15", instructionalUnits: 1, isLast: false },
+    { id: "sa-2", dayId: "sat", dayLabel: "شنبه", dayOrder: 0, position: 2, label: "زنگ ۲", startTime: "08:20", endTime: "09:05", instructionalUnits: 1, isLast: false },
+    { id: "sa-3", dayId: "sat", dayLabel: "شنبه", dayOrder: 0, position: 3, label: "زنگ ۳", startTime: "09:10", endTime: "09:55", instructionalUnits: 1, isLast: true },
+    { id: "su-1", dayId: "sun", dayLabel: "یکشنبه", dayOrder: 1, position: 1, label: "زنگ ۱", startTime: "07:30", endTime: "08:15", instructionalUnits: 1, isLast: false },
+    { id: "su-2", dayId: "sun", dayLabel: "یکشنبه", dayOrder: 1, position: 2, label: "زنگ ۲", startTime: "08:20", endTime: "09:05", instructionalUnits: 1, isLast: false },
+    { id: "su-3", dayId: "sun", dayLabel: "یکشنبه", dayOrder: 1, position: 3, label: "زنگ ۳", startTime: "09:10", endTime: "09:55", instructionalUnits: 1, isLast: true },
   ];
   const availability = Object.fromEntries(periods.map((period) => [period.id, period.position === 1 ? "PREFERRED" : "AVAILABLE"]));
   return {

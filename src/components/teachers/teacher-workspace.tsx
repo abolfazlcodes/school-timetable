@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { BriefcaseBusiness, CalendarClock, Pencil, Plus, UserRound, UsersRound, X } from "lucide-react";
+import { BookOpenCheck, BriefcaseBusiness, CalendarClock, Pencil, Plus, Search, UserRound, UsersRound, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/field";
@@ -16,10 +16,22 @@ const employmentLabels = { FULL_TIME: "تمام‌وقت", PART_TIME: "پاره�
 const staffLabels = { TEACHER: "دبیر", VICE_PRINCIPAL: "معاون", EDUCATIONAL_DEPUTY: "معاون آموزشی", EXECUTIVE_DEPUTY: "معاون اجرایی", CULTURAL_DEPUTY: "معاون فرهنگی", OTHER: "سایر کارکنان" } as const;
 const availabilityLabels = { AVAILABLE: "مجاز", UNAVAILABLE: "غایب", PREFERRED: "ترجیحی", RESTRICTED: "محدود" } as const;
 
+function normalizeSearch(value: string) {
+  return value.trim().toLocaleLowerCase("fa-IR").replaceAll("ي", "ی").replaceAll("ك", "ک").replaceAll("‌", " ");
+}
+
 function Labeled({ label, children }: { label: string; children: React.ReactNode }) { return <label className="compact-field"><span>{label}</span>{children}</label>; }
 
+function teacherDisplayName(teacher: Pick<NonNullable<TeacherWorkspaceData["selectedTeacher"]>, "firstName" | "lastName">) {
+  return `${teacher.firstName} ${teacher.lastName}`.trim();
+}
+
+function teacherInitials(teacher: Pick<NonNullable<TeacherWorkspaceData["selectedTeacher"]>, "firstName" | "lastName">) {
+  return [teacher.firstName.trim()[0], teacher.lastName.trim()[0]].filter(Boolean).join("") || "د";
+}
+
 function TeacherFields({ teacher }: { teacher?: TeacherWorkspaceData["selectedTeacher"] }) {
-  return <><Labeled label="نام"><Input name="firstName" required defaultValue={teacher?.firstName} /></Labeled><Labeled label="نام خانوادگی"><Input name="lastName" required defaultValue={teacher?.lastName} /></Labeled><Labeled label="کد پرسنلی"><Input name="personnelCode" required defaultValue={teacher?.personnelCode} /></Labeled><Labeled label="نوع همکاری"><Select name="employmentType" defaultValue={teacher?.employmentType ?? "FULL_TIME"}>{Object.entries(employmentLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select></Labeled><Labeled label="مسئولیت"><Select name="staffKind" defaultValue={teacher?.staffKind ?? "TEACHER"}>{Object.entries(staffLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select></Labeled><Labeled label="یادداشت"><Input name="notes" defaultValue={teacher?.notes ?? ""} placeholder="اختیاری" /></Labeled></>;
+  return <><Labeled label="نام (در صورت ثبت)"><Input name="firstName" defaultValue={teacher?.firstName} /></Labeled><Labeled label="نام خانوادگی"><Input name="lastName" defaultValue={teacher?.lastName} placeholder="حداقل نام یا نام خانوادگی" /></Labeled><Labeled label="کد پرسنلی"><Input name="personnelCode" required defaultValue={teacher?.personnelCode} /></Labeled><Labeled label="نوع همکاری"><Select name="employmentType" defaultValue={teacher?.employmentType ?? "FULL_TIME"}>{Object.entries(employmentLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select></Labeled><Labeled label="مسئولیت"><Select name="staffKind" defaultValue={teacher?.staffKind ?? "TEACHER"}>{Object.entries(staffLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select></Labeled><Labeled label="یادداشت"><Input name="notes" defaultValue={teacher?.notes ?? ""} placeholder="اختیاری" /></Labeled></>;
 }
 
 function TeacherIdentityEditor({ teacher }: { teacher: NonNullable<TeacherWorkspaceData["selectedTeacher"]> }) {
@@ -32,7 +44,7 @@ function TeacherIdentityEditor({ teacher }: { teacher: NonNullable<TeacherWorksp
   };
   return <section className="panel teacher-section">
     <div className="teacher-section__title">
-      <div><UserRound size={18} /><span><strong>{teacher.firstName} {teacher.lastName}</strong><small>{isEditing ? "در حال ویرایش اطلاعات دبیر" : "اطلاعات پایدار دبیر · فقط خواندنی"}</small></span></div>
+      <div><UserRound size={18} /><span><strong>{teacherDisplayName(teacher)}</strong><small>{isEditing ? "در حال ویرایش اطلاعات دبیر" : "اطلاعات پایدار دبیر · فقط خواندنی"}</small></span></div>
       <div className="teacher-section__actions"><Badge variant={teacher.isActive ? "success" : "warning"}>{teacher.isActive ? "فعال" : "غیرفعال"}</Badge><Button type="button" variant="secondary" size="sm" onClick={toggleEditing} aria-pressed={isEditing}>{isEditing ? <X size={15} /> : <Pencil size={15} />}{isEditing ? "لغو ویرایش" : "ویرایش اطلاعات دبیر"}</Button></div>
     </div>
     <ManagedForm key={`${teacherRevision}:${formVersion}`} action={editTeacherAction} submitLabel="ذخیره مشخصات" hideSubmit={!isEditing} refreshOnSuccess onSuccess={() => setIsEditing(false)}>
@@ -92,17 +104,63 @@ function TeacherAvailabilityEditor({ teacher, academicYearId, schoolDays }: { te
   );
 }
 
+function SubjectAssignmentPicker({ subjects, assignmentBySubject }: { subjects: TeacherWorkspaceData["subjects"]; assignmentBySubject: Map<string, number> }) {
+  const [query, setQuery] = useState("");
+  const [scope, setScope] = useState<"all" | "selected">("all");
+  const [selectedIds, setSelectedIds] = useState(() => new Set(assignmentBySubject.keys()));
+  const normalizedQuery = normalizeSearch(query);
+  const availableSubjects = subjects
+    .filter((subject) => subject.isActive || assignmentBySubject.has(subject.id))
+    .sort((left, right) => Number(selectedIds.has(right.id)) - Number(selectedIds.has(left.id)) || left.name.localeCompare(right.name, "fa"));
+  const isVisible = (subject: TeacherWorkspaceData["subjects"][number]) => {
+    const matchesQuery = !normalizedQuery || normalizeSearch(subject.name).includes(normalizedQuery);
+    return matchesQuery && (scope === "all" || selectedIds.has(subject.id));
+  };
+  const visibleCount = availableSubjects.filter(isVisible).length;
+
+  return <>
+    <div className="subject-assignment-toolbar">
+      <label className="compact-search">
+        <Search size={16} aria-hidden="true" />
+        <Input type="search" value={query} onChange={(event) => setQuery(event.target.value)} aria-label="جست‌وجوی درس" placeholder="جست‌وجوی نام درس…" />
+      </label>
+      <div className="subject-scope" aria-label="فیلتر درس‌ها">
+        <button type="button" className={cn(scope === "all" && "is-active")} aria-pressed={scope === "all"} onClick={() => setScope("all")}>همه</button>
+        <button type="button" className={cn(scope === "selected" && "is-active")} aria-pressed={scope === "selected"} onClick={() => setScope("selected")}>انتخاب‌شده <span>{selectedIds.size.toLocaleString("fa-IR")}</span></button>
+      </div>
+      <small>{visibleCount.toLocaleString("fa-IR")} درس نمایش داده می‌شود</small>
+    </div>
+    <div className="subject-assignment-grid" role="group" aria-label="انتخاب درس‌ها و ساعت تخصیص">
+      {availableSubjects.map((subject) => {
+        const assigned = assignmentBySubject.get(subject.id);
+        const selected = selectedIds.has(subject.id);
+        return <label key={subject.id} hidden={!isVisible(subject)} className={cn(selected && "is-selected")}>
+          <span><input type="checkbox" name="subjectIds" value={subject.id} defaultChecked={assigned !== undefined} onChange={(event) => setSelectedIds((current) => { const next = new Set(current); if (event.target.checked) next.add(subject.id); else next.delete(subject.id); return next; })} /> {subject.name}</span>
+          <Input name={`hours:${subject.id}`} inputMode="numeric" min="1" max="100" defaultValue={assigned || ""} aria-label={`ساعت تخصیص ${subject.name}`} placeholder="ساعت" />
+        </label>;
+      })}
+      {visibleCount === 0 ? <div className="subject-search-empty"><BookOpenCheck size={21} /><span>{scope === "selected" ? "درسی با این جست‌وجو انتخاب نشده است." : "درسی با این نام پیدا نشد."}</span></div> : null}
+      {!subjects.some((item) => item.isActive) ? <span className="muted">ابتدا درس‌ها را در گام قبل تعریف کنید.</span> : null}
+    </div>
+  </>;
+}
+
 export function TeacherWorkspace({ data, embedded = false }: { data: TeacherWorkspaceData; embedded?: boolean }) {
+  const [teacherQuery, setTeacherQuery] = useState("");
   const selected = data.selectedTeacher;
   const selectHref = (teacherId: string) => embedded ? `/planning?step=teachers&teacher=${teacherId}` : `/teachers?teacher=${teacherId}`;
-  const defaults = selected?.profile ?? { minimumWorkload: 20, requiredWorkload: 24, maximumWorkload: 28, overtimeAllowance: 4, dailyMinimum: 0, dailyMaximum: 6, maxConsecutive: 3 };
+  const defaults = selected?.profile ?? { minimumWorkload: 20, requiredWorkload: 24, maximumWorkload: 24, overtimeAllowance: 4, dailyMinimum: 0, dailyMaximum: 6, maxConsecutive: 3 };
   const assignedHours = selected?.subjectAssignments.reduce((sum, item) => sum + item.assignedWeeklyHours, 0) ?? 0;
+  const currentOvertime = selected?.profile ? Math.max(0, assignedHours - selected.profile.requiredWorkload) : 0;
   const assignmentBySubject = new Map(selected?.subjectAssignments.map((item) => [item.subjectId, item.assignedWeeklyHours]) ?? []);
+  const normalizedTeacherQuery = normalizeSearch(teacherQuery);
+  const visibleTeachers = data.teachers.filter((teacher) => !normalizedTeacherQuery || normalizeSearch(`${teacher.firstName} ${teacher.lastName} ${teacher.personnelCode}`).includes(normalizedTeacherQuery));
   return (
     <div className="teacher-workspace">
       <aside className="teacher-directory panel">
         <div className="panel__header"><div><h2>دبیران</h2><p>{data.teachers.length.toLocaleString("fa-IR")} نفر ثبت‌شده</p></div><UsersRound size={19} /></div>
-        <div className="teacher-list">{data.teachers.map((teacher) => <Link href={selectHref(teacher.id)} key={teacher.id} className={cn("teacher-list__item", teacher.id === selected?.id && "is-active")}><span className="avatar">{teacher.firstName[0]}{teacher.lastName[0]}</span><div><strong>{teacher.firstName} {teacher.lastName}</strong><small>{staffLabels[teacher.staffKind]} · {employmentLabels[teacher.employmentType]}</small></div>{!teacher.isActive ? <Badge variant="warning">غیرفعال</Badge> : null}</Link>)}{!data.teachers.length ? <div className="directory-empty"><UserRound size={24} /><span>هنوز دبیری ثبت نشده است.</span></div> : null}</div>
+        <label className="compact-search teacher-directory__search"><Search size={16} aria-hidden="true" /><Input type="search" value={teacherQuery} onChange={(event) => setTeacherQuery(event.target.value)} aria-label="جست‌وجوی دبیر" placeholder="نام یا کد پرسنلی…" /></label>
+        <div className="teacher-list">{visibleTeachers.map((teacher) => <Link href={selectHref(teacher.id)} key={teacher.id} className={cn("teacher-list__item", teacher.id === selected?.id && "is-active")}><span className="avatar">{teacherInitials(teacher)}</span><div><strong>{teacherDisplayName(teacher)}</strong><small>{staffLabels[teacher.staffKind]} · {employmentLabels[teacher.employmentType]}</small></div>{!teacher.isActive ? <Badge variant="warning">غیرفعال</Badge> : null}</Link>)}{!data.teachers.length ? <div className="directory-empty"><UserRound size={24} /><span>هنوز دبیری ثبت نشده است.</span></div> : visibleTeachers.length === 0 ? <div className="directory-empty directory-empty--compact"><Search size={21} /><span>دبیری با این مشخصات پیدا نشد.</span></div> : null}</div>
         <details className="inline-disclosure teacher-add"><summary><Plus size={15} /> افزودن دبیر</summary><ManagedForm action={addTeacherAction} submitLabel="افزودن دبیر" className="form-grid form-grid--two"><TeacherFields /></ManagedForm></details>
       </aside>
 
@@ -116,8 +174,8 @@ export function TeacherWorkspace({ data, embedded = false }: { data: TeacherWork
               <ManagedForm compact action={saveTeacherSubjectAssignmentsAction} submitLabel="ذخیره تخصیص درس‌ها" refreshOnSuccess>
                 <input type="hidden" name="teacherId" value={selected.id} />
                 <input type="hidden" name="academicYearId" value={data.activeAcademicYear.id} />
-                <div className="subject-assignment-summary"><span>جمع تخصیص سالانه</span><strong>{assignedHours.toLocaleString("fa-IR")} ساعت</strong>{selected.profile ? <small>موظفی ثبت‌شده: {selected.profile.requiredWorkload.toLocaleString("fa-IR")} ساعت</small> : <small>موظفی هنوز ثبت نشده است.</small>}</div>
-                <div className="subject-assignment-grid">{data.subjects.filter((subject) => subject.isActive || assignmentBySubject.has(subject.id)).map((subject) => { const assigned = assignmentBySubject.get(subject.id); return <label key={subject.id}><span><input type="checkbox" name="subjectIds" value={subject.id} defaultChecked={assigned !== undefined} /> {subject.name}</span><Input name={`hours:${subject.id}`} inputMode="numeric" min="1" max="100" defaultValue={assigned || ""} aria-label={`ساعت تخصیص ${subject.name}`} placeholder="ساعت" /></label>; })}{!data.subjects.some((item) => item.isActive) ? <span className="muted">ابتدا درس‌ها را در گام قبل تعریف کنید.</span> : null}</div>
+                <div className="subject-assignment-summary"><span>جمع تخصیص سالانه</span><strong>{assignedHours.toLocaleString("fa-IR")} ساعت</strong>{selected.profile ? <small>موظفی: {selected.profile.requiredWorkload.toLocaleString("fa-IR")} ساعت{currentOvertime > 0 ? ` · اضافه‌کار فعلی: ${currentOvertime.toLocaleString("fa-IR")} ساعت` : ""}</small> : <small>موظفی هنوز ثبت نشده است.</small>}</div>
+                <SubjectAssignmentPicker subjects={data.subjects} assignmentBySubject={assignmentBySubject} />
               </ManagedForm>
               <ManagedForm compact action={saveTeacherProfileAction} submitLabel="ذخیره موظفی" className="workload-form" refreshOnSuccess><input type="hidden" name="teacherId" value={selected.id} /><input type="hidden" name="academicYearId" value={data.activeAcademicYear.id} /><Labeled label="حداقل"><Input name="minimumWorkload" inputMode="numeric" defaultValue={defaults.minimumWorkload} required /></Labeled><Labeled label="موظفی"><Input name="requiredWorkload" inputMode="numeric" defaultValue={defaults.requiredWorkload} required /></Labeled><Labeled label="حداکثر"><Input name="maximumWorkload" inputMode="numeric" defaultValue={defaults.maximumWorkload} required /></Labeled><Labeled label="اضافه‌کاری مجاز"><Input name="overtimeAllowance" inputMode="numeric" defaultValue={defaults.overtimeAllowance} required /></Labeled><Labeled label="حداقل روزانه"><Input name="dailyMinimum" inputMode="numeric" defaultValue={defaults.dailyMinimum} required /></Labeled><Labeled label="حداکثر روزانه"><Input name="dailyMaximum" inputMode="numeric" defaultValue={defaults.dailyMaximum} required /></Labeled><Labeled label="حداکثر متوالی"><Input name="maxConsecutive" inputMode="numeric" defaultValue={defaults.maxConsecutive} required /></Labeled></ManagedForm>
             </section>

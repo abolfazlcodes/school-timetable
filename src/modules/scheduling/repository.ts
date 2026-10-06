@@ -2,7 +2,7 @@ import { and, asc, desc, eq } from "drizzle-orm";
 import type { PgDatabase } from "drizzle-orm/pg-core";
 import type { PgQueryResultHKT } from "drizzle-orm/pg-core/session";
 import * as schema from "@/db/schema";
-import { academicYears, classGroups, curriculumItems, grades, majors, periods, scheduleCandidates, scheduleRuns, schoolDays, subjects, teacherAvailability, teacherSubjectAssignments, teacherYearProfiles, teachers } from "@/db/schema";
+import { academicYears, classGroups, classSubjectTeacherAssignments, curriculumItems, grades, majors, periods, scheduleCandidates, scheduleRuns, schoolDays, subjects, teacherAvailability, teacherSubjectAssignments, teacherYearProfiles, teachers } from "@/db/schema";
 import type { TenantContext } from "@/modules/tenancy/types";
 import type { ScheduleCandidate, SchedulingIssue, SchedulingProblem, SolverResult } from "./types";
 
@@ -21,7 +21,7 @@ export function createSchedulingRepository<TQueryResult extends PgQueryResultHKT
         : and(eq(academicYears.schoolId, context.schoolId), eq(academicYears.isActive, true));
       const [year] = await db.select({ id: academicYears.id, title: academicYears.title }).from(academicYears).where(yearCondition).limit(1);
       if (!year) return null;
-      const [classRows, curriculumRows, dayRows, periodRows, teacherRows, teacherSubjectRows, availabilityRows] = await Promise.all([
+      const [classRows, curriculumRows, classTeacherRows, dayRows, periodRows, teacherRows, teacherSubjectRows, availabilityRows] = await Promise.all([
         db.select({ id: classGroups.id, name: classGroups.name, gradeId: classGroups.gradeId, gradeName: grades.name, majorId: classGroups.majorId, majorName: majors.name })
           .from(classGroups)
           .innerJoin(grades, and(eq(grades.id, classGroups.gradeId), eq(grades.schoolId, context.schoolId)))
@@ -29,16 +29,26 @@ export function createSchedulingRepository<TQueryResult extends PgQueryResultHKT
           .where(and(eq(classGroups.schoolId, context.schoolId), eq(classGroups.academicYearId, year.id), eq(classGroups.isActive, true)))
           .orderBy(asc(grades.sortOrder), asc(classGroups.name)),
         db.select({ id: curriculumItems.id, gradeId: curriculumItems.gradeId, majorId: curriculumItems.majorId, subjectId: curriculumItems.subjectId, subjectName: subjects.name, weeklyHours: curriculumItems.weeklyHours, sessionPattern: curriculumItems.sessionPattern }).from(curriculumItems).innerJoin(subjects, and(eq(subjects.id, curriculumItems.subjectId), eq(subjects.schoolId, context.schoolId))).where(and(eq(curriculumItems.schoolId, context.schoolId), eq(curriculumItems.academicYearId, year.id), eq(curriculumItems.isActive, true), eq(subjects.isActive, true))).orderBy(asc(curriculumItems.id)),
+        db.select({ classId: classSubjectTeacherAssignments.classId, subjectId: classSubjectTeacherAssignments.subjectId, teacherId: classSubjectTeacherAssignments.teacherId }).from(classSubjectTeacherAssignments).where(and(eq(classSubjectTeacherAssignments.schoolId, context.schoolId), eq(classSubjectTeacherAssignments.academicYearId, year.id))),
         db.select({ id: schoolDays.id, label: schoolDays.label, sortOrder: schoolDays.sortOrder }).from(schoolDays).where(and(eq(schoolDays.schoolId, context.schoolId), eq(schoolDays.academicYearId, year.id), eq(schoolDays.isActive, true))).orderBy(asc(schoolDays.sortOrder)),
-        db.select({ id: periods.id, dayId: periods.schoolDayId, position: periods.position, label: periods.label, startTime: periods.startTime, endTime: periods.endTime }).from(periods).where(and(eq(periods.schoolId, context.schoolId), eq(periods.academicYearId, year.id), eq(periods.isActive, true))).orderBy(asc(periods.position)),
+        db.select({ id: periods.id, dayId: periods.schoolDayId, position: periods.position, label: periods.label, startTime: periods.startTime, endTime: periods.endTime, instructionalUnits: periods.instructionalUnits }).from(periods).where(and(eq(periods.schoolId, context.schoolId), eq(periods.academicYearId, year.id), eq(periods.isActive, true))).orderBy(asc(periods.position)),
         db.select({ id: teachers.id, firstName: teachers.firstName, lastName: teachers.lastName, minimumWorkload: teacherYearProfiles.minimumWorkload, requiredWorkload: teacherYearProfiles.requiredWorkload, maximumWorkload: teacherYearProfiles.maximumWorkload, overtimeAllowance: teacherYearProfiles.overtimeAllowance, dailyMaximum: teacherYearProfiles.dailyMaximum, maxConsecutive: teacherYearProfiles.maxConsecutive }).from(teachers).leftJoin(teacherYearProfiles, and(eq(teacherYearProfiles.teacherId, teachers.id), eq(teacherYearProfiles.academicYearId, year.id), eq(teacherYearProfiles.schoolId, context.schoolId))).where(and(eq(teachers.schoolId, context.schoolId), eq(teachers.isActive, true))).orderBy(asc(teachers.id)),
         db.select({ teacherId: teacherSubjectAssignments.teacherId, subjectId: teacherSubjectAssignments.subjectId, assignedWeeklyHours: teacherSubjectAssignments.assignedWeeklyHours }).from(teacherSubjectAssignments).where(and(eq(teacherSubjectAssignments.schoolId, context.schoolId), eq(teacherSubjectAssignments.academicYearId, year.id))),
         db.select({ teacherId: teacherAvailability.teacherId, periodId: teacherAvailability.periodId, status: teacherAvailability.status }).from(teacherAvailability).where(and(eq(teacherAvailability.schoolId, context.schoolId), eq(teacherAvailability.academicYearId, year.id))),
       ]);
       const classes = classRows;
-      const curriculum = curriculumRows.flatMap((rule) => classes.filter((schoolClass) => schoolClass.gradeId === rule.gradeId && (rule.majorId === null || schoolClass.majorId === rule.majorId)).map((schoolClass) => ({ id: `${rule.id}:${schoolClass.id}`, classId: schoolClass.id, className: schoolClass.name, subjectId: rule.subjectId, subjectName: rule.subjectName, weeklyHours: rule.weeklyHours, sessionPattern: rule.sessionPattern })));
+      const curriculum = curriculumRows.flatMap((rule) => classes.filter((schoolClass) => schoolClass.gradeId === rule.gradeId && (rule.majorId === null || schoolClass.majorId === rule.majorId)).map((schoolClass) => ({
+        id: `${rule.id}:${schoolClass.id}`,
+        classId: schoolClass.id,
+        className: schoolClass.name,
+        subjectId: rule.subjectId,
+        subjectName: rule.subjectName,
+        weeklyHours: rule.weeklyHours,
+        sessionPattern: rule.sessionPattern,
+        assignedTeacherId: classTeacherRows.find((item) => item.classId === schoolClass.id && item.subjectId === rule.subjectId)?.teacherId ?? null,
+      })));
       const periodsView = periodRows.map((period) => { const day = dayRows.find((item) => item.id === period.dayId)!; const lastPosition = Math.max(...periodRows.filter((item) => item.dayId === period.dayId).map((item) => item.position)); return { ...period, dayLabel: day.label, dayOrder: day.sortOrder, isLast: period.position === lastPosition }; });
-      const teacherResources = teacherRows.map((teacher) => ({ id: teacher.id, name: `${teacher.firstName} ${teacher.lastName}`, profileConfigured: teacher.requiredWorkload !== null, subjectAssignments: teacherSubjectRows.filter((row) => row.teacherId === teacher.id).map(({ subjectId, assignedWeeklyHours }) => ({ subjectId, assignedWeeklyHours })), minimumWorkload: teacher.minimumWorkload ?? 0, requiredWorkload: teacher.requiredWorkload ?? 0, maximumWorkload: teacher.maximumWorkload ?? 0, overtimeAllowance: teacher.overtimeAllowance ?? 0, dailyMaximum: teacher.dailyMaximum ?? 0, maxConsecutive: teacher.maxConsecutive ?? 0, availability: Object.fromEntries(availabilityRows.filter((row) => row.teacherId === teacher.id).map((row) => [row.periodId, row.status])) }));
+      const teacherResources = teacherRows.map((teacher) => ({ id: teacher.id, name: `${teacher.firstName} ${teacher.lastName}`.trim(), profileConfigured: teacher.requiredWorkload !== null, subjectAssignments: teacherSubjectRows.filter((row) => row.teacherId === teacher.id).map(({ subjectId, assignedWeeklyHours }) => ({ subjectId, assignedWeeklyHours })), minimumWorkload: teacher.minimumWorkload ?? 0, requiredWorkload: teacher.requiredWorkload ?? 0, maximumWorkload: teacher.maximumWorkload ?? 0, overtimeAllowance: teacher.overtimeAllowance ?? 0, dailyMaximum: teacher.dailyMaximum ?? 0, maxConsecutive: teacher.maxConsecutive ?? 0, availability: Object.fromEntries(availabilityRows.filter((row) => row.teacherId === teacher.id).map((row) => [row.periodId, row.status])) }));
       return { schoolId: context.schoolId, academicYearId: year.id, academicYearTitle: year.title, classes, periods: periodsView, curriculum, teachers: teacherResources };
     },
     async saveRun(context, input) {

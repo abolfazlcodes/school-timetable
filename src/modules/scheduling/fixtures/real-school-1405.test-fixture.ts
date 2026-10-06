@@ -28,7 +28,7 @@ export const referenceTeacherRows = [
   {
     id: "seyed-mohammad-hosseini",
     name: "سیدمحمد حسینی",
-    days: 3,
+    days: 4,
     assignments: { فیزیک: 7, ریاضیات: 17 },
   },
   {
@@ -100,6 +100,7 @@ function makePeriods(): ProblemPeriod[] {
       label: `زنگ ${index + 1}`,
       startTime,
       endTime,
+      instructionalUnits: index < 3 ? 2 : 1,
       isLast: index === times.length - 1,
     })),
   );

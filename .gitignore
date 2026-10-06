@@ -8,3 +8,4 @@ test-results
 *.local.sql
 *.log
 .DS_Store
+/docs-assets

@@ -1,6 +1,8 @@
 import type { AvailabilityStatus } from "@/db/schema";
 
 export type IssueSeverity = "ERROR" | "WARNING" | "INFO";
+export type CycleWeek = "A" | "B";
+export type WeekPattern = "EVERY_WEEK" | "WEEK_A" | "WEEK_B";
 export interface SchedulingIssue {
   code: string;
   severity: IssueSeverity;
@@ -18,6 +20,7 @@ export interface ProblemPeriod {
   label: string;
   startTime: string;
   endTime: string;
+  instructionalUnits: number;
   isLast: boolean;
 }
 export interface ProblemClass {
@@ -36,6 +39,7 @@ export interface CurriculumRequirement {
   subjectName: string;
   weeklyHours: number;
   sessionPattern: number[];
+  assignedTeacherId?: string | null;
 }
 export interface TeacherSubjectAssignment {
   subjectId: string;
@@ -72,6 +76,7 @@ export interface SessionRequirement {
   subjectId: string;
   subjectName: string;
   workloadHours: number;
+  assignedTeacherId?: string | null;
 }
 export interface ScheduleAssignment {
   sessionId: string;
@@ -82,6 +87,26 @@ export interface ScheduleAssignment {
   dayId: string;
   startPosition: number;
   periodIds: string[];
+  /** Optional only for reading schedule snapshots created before csp-1.2. */
+  weekPattern?: WeekPattern;
+}
+
+export function normalizedWeekPattern(assignment: Pick<ScheduleAssignment, "weekPattern">): WeekPattern {
+  return assignment.weekPattern ?? "EVERY_WEEK";
+}
+
+export function activeCycleWeeks(pattern: WeekPattern): CycleWeek[] {
+  return pattern === "EVERY_WEEK" ? ["A", "B"] : pattern === "WEEK_A" ? ["A"] : ["B"];
+}
+
+export function compatibleWeekPatterns(workloadHours: number, instructionalUnits: number): WeekPattern[] {
+  if (workloadHours === instructionalUnits) return ["EVERY_WEEK"];
+  if (workloadHours * 2 === instructionalUnits) return ["WEEK_A", "WEEK_B"];
+  return [];
+}
+
+export function weekPatternLabel(pattern: WeekPattern): string {
+  return pattern === "EVERY_WEEK" ? "هر هفته" : pattern === "WEEK_A" ? "هفته اول" : "هفته دوم";
 }
 export interface PenaltyBreakdown {
   preference: number;
@@ -126,6 +151,7 @@ export function expandSessions(
       subjectId: item.subjectId,
       subjectName: item.subjectName,
       workloadHours,
+      assignedTeacherId: item.assignedTeacherId,
     })),
   );
 }

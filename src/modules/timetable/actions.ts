@@ -23,6 +23,7 @@ export async function createScheduleWorkspaceAction(formData: FormData) {
     );
   } catch (error) {
     if (error instanceof AuthorizationError) redirect("/");
+    console.error("Schedule workspace creation failed", error);
     redirect(returnTo === "planning" ? "/planning?step=generate&workspaceError=1" : "/timetable?workspaceError=1");
   }
   redirect(returnTo === "planning" ? `/planning?step=edit&workspace=${workspaceId}` : `/timetable?workspace=${workspaceId}`);

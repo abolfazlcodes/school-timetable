@@ -23,8 +23,12 @@ import {
   type SchedulingProblem,
 } from "./types";
 
-const ENGINE_VERSION = "cp-sat-2.2";
+const ENGINE_VERSION = "cp-sat-2.3";
 export { ENGINE_VERSION };
+
+// OR-Tools SatParameters.SearchBranching.HINT_SEARCH. The package exposes the
+// typed parameter but not the generated enum from its public entry point.
+const HINT_SEARCH = 6 as const;
 
 interface Placement {
   variable: BoolVar;
@@ -928,11 +932,12 @@ async function solveDecomposition(
 
   const solver = new CpSolver();
   solver.parameters.maxTimeInSeconds = Math.max(1, timeBudgetMs) / 1_000;
-  // Interleaved workers use deterministic work sharing. Twelve workers were
-  // selected because the decomposition has independent propagation paths for
-  // teacher, day and capacity-mode variables; the exact pass remains smaller.
-  solver.parameters.numSearchWorkers = 12;
-  solver.parameters.interleaveSearch = true;
+  // One worker avoids oversubscribing serverless runtimes with a single vCPU.
+  // The decomposition already receives a complete teacher/day warm start in
+  // normal large-school runs, so hint search reaches a stable coarse plan much
+  // faster than the generic portfolio on that hardware.
+  solver.parameters.numSearchWorkers = 1;
+  if (hints?.size) solver.parameters.searchBranching = HINT_SEARCH;
   solver.parameters.randomSeed = 1;
   const status = await solver.solve(model);
   if (status !== CpSolverStatus.OPTIMAL && status !== CpSolverStatus.FEASIBLE) {
@@ -1186,8 +1191,7 @@ async function solveExact(
     }
     const solver = new CpSolver();
     solver.parameters.maxTimeInSeconds = remainingMs / 1_000;
-    solver.parameters.numSearchWorkers = locks ? 1 : 8;
-    if (!locks) solver.parameters.interleaveSearch = true;
+    solver.parameters.numSearchWorkers = 1;
     solver.parameters.randomSeed = 1;
     status = await solver.solve(model);
     exploredNodes += solver.numBranches;
@@ -1255,8 +1259,10 @@ async function diagnoseMaximumFeasible(
   );
   const solver = new CpSolver();
   solver.parameters.maxTimeInSeconds = Math.max(0.01, timeBudgetMs / 1_000);
-  solver.parameters.numSearchWorkers = 8;
-  solver.parameters.interleaveSearch = true;
+  // Keep the diagnostic path inside the same single-vCPU budget as the main
+  // solve. Oversubscribing here makes an already unsuccessful run more likely
+  // to end as a serverless timeout before its actionable diagnosis is saved.
+  solver.parameters.numSearchWorkers = 1;
   solver.parameters.randomSeed = 1;
   const status = await solver.solve(model);
   if (status !== CpSolverStatus.OPTIMAL && status !== CpSolverStatus.FEASIBLE) {

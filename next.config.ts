@@ -5,6 +5,11 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
   serverExternalPackages: ["@ortools-node/cp-sat"],
+  outputFileTracingIncludes: {
+    "/planning": [
+      "node_modules/@ortools-node/cp-sat/prebuilds/linux-x64/**/*",
+    ],
+  },
 };
 
 export default nextConfig;

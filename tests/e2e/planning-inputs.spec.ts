@@ -245,6 +245,35 @@ test("برنامه درسی طولانی با پایه و رشته فیلتر م
   ).toBe(true);
 });
 
+test("قطع درخواست تولید، همان صفحه را قابل بازیابی نگه می‌دارد", async ({
+  page,
+}) => {
+  await login(page);
+  await page
+    .getByLabel("انتخاب مدرسه فعال")
+    .selectOption("20000000-0000-4000-8000-000000000003");
+  await page.getByRole("button", { name: "اعمال مدرسه انتخاب‌شده" }).click();
+  await page.goto("/planning?step=generate");
+  await expect(page.getByRole("button", { name: "تولید برنامه" })).toBeVisible();
+
+  await page.route("**/planning?step=generate", async (route) => {
+    if (route.request().method() === "POST") {
+      await route.abort("failed");
+      return;
+    }
+    await route.continue();
+  });
+  await page.getByRole("button", { name: "تولید برنامه" }).click();
+
+  await expect(page.locator(".generation-control__error")).toContainText(
+    "پاسخی از سرور دریافت نشد",
+  );
+  await expect(
+    page.getByRole("button", { name: "بارگذاری نسخه جدید" }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "تولید برنامه" })).toBeDisabled();
+});
+
 test("الگوی اختصاصی عربی دوازدهم تجربی قابل تنظیم است و برنامه معتبر می‌سازد", async ({
   page,
 }) => {
@@ -313,7 +342,11 @@ test("الگوی اختصاصی عربی دوازدهم تجربی قابل تن
   await expect(page.locator(".preflight-metrics")).toContainText("۱۰");
   await page.getByRole("link", { name: "ادامه به تولید برنامه" }).click();
   await page.getByRole("button", { name: "تولید برنامه" }).click();
-  await expect(page.getByText("برنامه معتبر تولید شد")).toBeVisible({ timeout: 45_000 });
+  await expect(page).toHaveURL(/planning\?step=generate&run=/, {
+    timeout: 60_000,
+  });
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByText("برنامه معتبر تولید شد")).toBeVisible();
   await expect(page.locator(".candidate-card").first()).toContainText("بدون تداخل");
   await page
     .getByLabel("انتخاب مدرسه فعال")
@@ -369,9 +402,11 @@ test("پیش‌بررسی موفق است و solver برنامه معتبر و �
   await expect(page.getByText("خطای مسدودکننده‌ای پیدا نشد.")).toBeVisible();
   await page.getByRole("link", { name: "ادامه به تولید برنامه" }).click();
   await page.getByRole("button", { name: "تولید برنامه" }).click();
-  await expect(page.getByText("برنامه معتبر تولید شد")).toBeVisible({
-    timeout: 15_000,
+  await expect(page).toHaveURL(/planning\?step=generate&run=/, {
+    timeout: 20_000,
   });
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByText("برنامه معتبر تولید شد")).toBeVisible();
   await expect(page.locator(".candidate-card")).toHaveCount(3);
   await expect(page.getByText("بدون تداخل")).toHaveCount(3);
 

@@ -1,11 +1,10 @@
 import Link from "next/link";
 import { AlertTriangle, CheckCircle2, Clock3, Eye, Layers3, PencilLine, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { generateTimetableAction } from "@/modules/scheduling/actions";
 import type { PreflightResult } from "@/modules/scheduling/preflight";
 import type { StoredRun } from "@/modules/scheduling/repository";
 import { createScheduleWorkspaceAction } from "@/modules/timetable/actions";
-import { GenerateButton } from "./generate-button";
+import { GenerateControl } from "./generate-control";
 
 function metric(summary: Record<string, unknown>, key: string) {
   return typeof summary[key] === "number" ? summary[key] as number : 0;
@@ -38,7 +37,7 @@ export function GenerateWorkspace({
           <span className="section-icon"><Layers3 size={20} /></span>
           <span><h2>{run ? "تولید نسخه جدید" : "همه‌چیز برای تولید آماده است"}</h2><p>سامانه با همان داده‌ها همواره تصمیم‌های قابل بازتولید می‌گیرد.</p></span>
         </div>
-        <form action={generateTimetableAction}><GenerateButton /></form>
+        <GenerateControl />
       </section>
       {run ? (
         <>

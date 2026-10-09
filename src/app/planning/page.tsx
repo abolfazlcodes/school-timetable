@@ -21,6 +21,7 @@ import { getTimetableView } from "@/modules/timetable/service";
 import { createScheduleVersionRepository } from "@/modules/schedule-versions/repository";
 
 export const metadata: Metadata = { title: "برنامه‌ریزی" };
+export const maxDuration = 60;
 
 function isAvailableStep(value: string | undefined): value is PlanningStep { return workflowSteps.some((step) => step.key === value && step.available); }
 

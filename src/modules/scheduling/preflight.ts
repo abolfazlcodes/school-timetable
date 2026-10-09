@@ -4,6 +4,117 @@ import type { SchedulingIssue, SchedulingProblem } from "./types";
 
 export interface PreflightResult { canGenerate: boolean; issues: SchedulingIssue[]; summary: { classCount: number; teacherCount: number; weeklyHours: number; sessionCount: number; errorCount: number; warningCount: number } }
 
+const EXACT_ALLOCATION_STATE_LIMIT = 200_000;
+
+/**
+ * Checks whether indivisible lesson sessions can be partitioned jointly between
+ * all teachers whose subject allocations exactly cover the subject demand.
+ *
+ * This is deliberately stronger than a gcd or a per-teacher subset check: a
+ * session consumed by one teacher is no longer available to the others.
+ * `null` means the bounded preflight search was inconclusive; in that case the
+ * solver remains the source of truth and preflight must not reject the input.
+ */
+function hasExactSubjectSessionPartition(
+  problem: SchedulingProblem,
+  subjectId: string,
+): boolean | null {
+  const teachers = problem.teachers
+    .map((teacher) => ({
+      teacher,
+      target: assignedHoursFor(teacher, subjectId),
+    }))
+    .filter((item) => item.target > 0)
+    .sort((left, right) => left.teacher.id.localeCompare(right.teacher.id));
+  const sessions = expandSessions(problem)
+    .filter((session) => session.subjectId === subjectId)
+    .map((session) => ({
+      session,
+      eligibleTeacherIndexes: teachers.flatMap(({ teacher }, index) => {
+        if (session.assignedTeacherId && session.assignedTeacherId !== teacher.id) {
+          return [];
+        }
+        const hasCompatiblePeriod = problem.periods.some(
+          (period) =>
+            ["AVAILABLE", "PREFERRED"].includes(
+              teacher.availability[period.id],
+            ) &&
+            compatibleWeekPatterns(
+              session.workloadHours,
+              period.instructionalUnits,
+            ).length > 0,
+        );
+        return hasCompatiblePeriod ? [index] : [];
+      }),
+    }))
+    .sort(
+      (left, right) =>
+        left.eligibleTeacherIndexes.length - right.eligibleTeacherIndexes.length ||
+        right.session.workloadHours - left.session.workloadHours ||
+        left.session.id.localeCompare(right.session.id),
+    );
+
+  if (!teachers.length || sessions.some((item) => !item.eligibleTeacherIndexes.length)) {
+    return false;
+  }
+
+  const remaining = teachers.map((item) => item.target);
+  if (
+    remaining.reduce((sum, hours) => sum + hours, 0) !==
+    sessions.reduce((sum, item) => sum + item.session.workloadHours, 0)
+  ) {
+    return false;
+  }
+  const suffixEligibleCapacity = Array.from(
+    { length: sessions.length + 1 },
+    () => Array(teachers.length).fill(0),
+  );
+  for (let index = sessions.length - 1; index >= 0; index -= 1) {
+    suffixEligibleCapacity[index] = [...suffixEligibleCapacity[index + 1]];
+    for (const teacherIndex of sessions[index].eligibleTeacherIndexes) {
+      suffixEligibleCapacity[index][teacherIndex] +=
+        sessions[index].session.workloadHours;
+    }
+  }
+  const memo = new Set<string>();
+  let visitedStates = 0;
+  let exhausted = false;
+
+  function search(index: number): boolean {
+    if (index === sessions.length) return remaining.every((hours) => hours === 0);
+    if (
+      remaining.some(
+        (hours, teacherIndex) =>
+          hours > suffixEligibleCapacity[index][teacherIndex],
+      )
+    ) {
+      return false;
+    }
+    if (visitedStates >= EXACT_ALLOCATION_STATE_LIMIT) {
+      exhausted = true;
+      return false;
+    }
+
+    const key = `${index}:${remaining.join(",")}`;
+    if (memo.has(key)) return false;
+    memo.add(key);
+    visitedStates += 1;
+
+    const { session, eligibleTeacherIndexes } = sessions[index];
+    const workload = session.workloadHours;
+    for (const teacherIndex of eligibleTeacherIndexes) {
+      if (remaining[teacherIndex] < workload) continue;
+      remaining[teacherIndex] -= workload;
+      if (search(index + 1)) return true;
+      remaining[teacherIndex] += workload;
+    }
+    return false;
+  }
+
+  const feasible = search(0);
+  return feasible ? true : exhausted ? null : false;
+}
+
 function maximumCompatibleSubjectHours(
   problem: SchedulingProblem,
   teacherId: string,
@@ -70,6 +181,35 @@ export function runPreflight(problem: SchedulingProblem): PreflightResult {
       )
       .map(([subjectId]) => subjectId),
   );
+  for (const subjectId of exactSubjects) {
+    if (hasExactSubjectSessionPartition(problem, subjectId) !== false) continue;
+    const subjectName = demandBySubject.get(subjectId)?.name ?? "درس";
+    const sessionParts = expandSessions(problem)
+      .filter((session) => session.subjectId === subjectId)
+      .map((session) => session.workloadHours)
+      .sort((left, right) => right - left)
+      .map((hours) => hours.toLocaleString("fa-IR"))
+      .join(" + ");
+    const teacherParts = problem.teachers
+      .map((teacher) => ({
+        name: teacher.name,
+        hours: assignedHoursFor(teacher, subjectId),
+      }))
+      .filter((item) => item.hours > 0)
+      .map(
+        (item) =>
+          `${item.name}: ${item.hours.toLocaleString("fa-IR")} ساعت`,
+      )
+      .join("، ");
+    issues.push({
+      code: "INCOMPATIBLE_SUBJECT_ALLOCATION_GRANULARITY",
+      severity: "ERROR",
+      message: `ساعت‌های تخصیص دقیق درس «${subjectName}» (${teacherParts}) با قطعه‌های جلسه‌ای ثبت‌شده (${sessionParts}) قابل تقسیم بین دبیران نیست؛ الگوی جلسات یا ساعت تخصیص دبیران را اصلاح کنید.`,
+      entityType: "subject",
+      entityId: subjectId,
+      fixHref: "/planning?step=curriculum",
+    });
+  }
   for (const teacher of problem.teachers) {
     if (!teacher.profileConfigured) issues.push({ code: "MISSING_WORKLOAD", severity: "ERROR", message: `موظفی سالانه «${teacher.name}» ثبت نشده است.`, entityType: "teacher", entityId: teacher.id, fixHref: `/planning?step=teachers&teacher=${teacher.id}` });
     const configured = Object.keys(teacher.availability).length;

@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   shahidBeheshtiClasses,
@@ -30,9 +31,12 @@ function makeCompleteShahidProblem(): SchedulingProblem {
     id: schoolClass.key,
     name: schoolClass.name,
     gradeId: schoolClass.grade,
-    gradeName: schoolClass.grade,
+    gradeName: `پایه ${schoolClass.grade}`,
+    gradeCode: schoolClass.grade,
+    gradeOrder: Number(schoolClass.grade),
     majorId: schoolClass.major,
     majorName: schoolClass.major,
+    majorCode: schoolClass.major,
   }));
   const curriculum = shahidBeheshtiLessonRows.map((row, index) => ({
     id: `requirement-${index}`,
@@ -53,8 +57,8 @@ function makeCompleteShahidProblem(): SchedulingProblem {
     requiredWorkload: teacher.requiredWorkload,
     maximumWorkload: teacher.requiredWorkload,
     overtimeAllowance: teacher.overtimeAllowance,
-    dailyMaximum: 4,
-    maxConsecutive: 4,
+    dailyMaximum: teacher.dailyMaximum,
+    maxConsecutive: teacher.maxConsecutive,
     availability: Object.fromEntries(
       periods.map((period) => [
         period.id,
@@ -68,7 +72,7 @@ function makeCompleteShahidProblem(): SchedulingProblem {
 }
 
 describe("داده کامل‌تر شهید بهشتی", () => {
-  it("ده کلاس، ۳۴۹ ساعت قابل‌زمان‌بندی و ۲۱ دبیر را بدون کمبود پوشش می‌دهد", () => {
+  it("ده کلاس، ۳۵۰ ساعت قابل‌زمان‌بندی و ۲۱ دبیر را بدون کمبود پوشش می‌دهد", () => {
     const teacherKeys = new Set(shahidBeheshtiTeachers.map((teacher) => teacher.key));
     const byClass = new Map<string, number>();
     const demandBySubject = new Map<string, number>();
@@ -84,9 +88,9 @@ describe("داده کامل‌تر شهید بهشتی", () => {
     }
     expect(shahidBeheshtiClasses).toHaveLength(10);
     expect(shahidBeheshtiTeachers).toHaveLength(21);
-    expect(shahidBeheshtiLessonRows.reduce((sum, row) => sum + row.hours, 0)).toBe(349);
-    expect(Object.fromEntries(byClass)).toMatchObject({ "10-math": 34 });
-    expect([...byClass].filter(([classKey]) => classKey !== "10-math").map(([, hours]) => hours)).toEqual(Array(9).fill(35));
+    expect(shahidBeheshtiLessonRows).toHaveLength(146);
+    expect(shahidBeheshtiLessonRows.reduce((sum, row) => sum + row.hours, 0)).toBe(350);
+    expect([...byClass.values()]).toEqual(Array(10).fill(35));
     expect(Object.fromEntries(assignedBySubject)).toEqual(Object.fromEntries(demandBySubject));
   });
 
@@ -109,10 +113,16 @@ describe("داده کامل‌تر شهید بهشتی", () => {
   it("الگوی جلسه‌های هر کلاس مجموع ساعت صحیح دارد و curriculum دو کلاس دوازدهم انسانی یکسان است", () => {
     for (const schoolClass of shahidBeheshtiClasses) {
       const rows = shahidBeheshtiLessonRows.filter((row) => row.classKey === schoolClass.key);
-      expect(rows.reduce((sum, row) => sum + row.hours, 0)).toBe(schoolClass.key === "10-math" ? 34 : 35);
+      expect(rows.reduce((sum, row) => sum + row.hours, 0)).toBe(35);
       expect(rows.flatMap((row) => shahidBeheshtiSessionPattern(row)).every((hours) => hours === 1 || hours === 2)).toBe(true);
     }
-    expect(shahidBeheshtiCurriculum).toHaveLength(130);
+    expect(shahidBeheshtiCurriculum).toHaveLength(131);
+    expect(
+      shahidBeheshtiLessonRows.reduce(
+        (sum, row) => sum + shahidBeheshtiSessionPattern(row).length,
+        0,
+      ),
+    ).toBe(222);
     const humanities12 = shahidBeheshtiCurriculum.filter((row) => row.grade === "12" && row.major === "HUMANITIES");
     expect(humanities12.reduce((sum, row) => sum + row.hours, 0)).toBe(35);
     expect(shahidBeheshtiLessonRows.find((row) => row.classKey === "12-humanities-a" && row.subject === "نگارش")?.teacherKey).toBe("abbas-nazari");
@@ -136,7 +146,8 @@ describe("داده کامل‌تر شهید بهشتی", () => {
         ["تفکر و سواد رسانه", "تفکر و سواد رسانه‌ای", "کارآفرینی", "ریاضیات گسسته", "هویت اجتماعی", "علوم اجتماعی", "مطالعات فرهنگی", "تربیت بدنی"].includes(row.subject)
           || (row.subject === "عربی" && row.grade === "12" && row.major === "SCIENCE")
           || (row.subject === "آزمایشگاه" && row.grade === "10")
-          || (row.subject === "نگارش" && ["10", "12"].includes(row.grade)),
+          || (row.subject === "نگارش" && ["10", "12"].includes(row.grade))
+          || (row.subject === "مدیریت خانواده" && row.grade === "12" && row.major === "MATH"),
         `${row.classKey}/${row.subject}`,
       ).toBe(true);
     }
@@ -152,6 +163,32 @@ describe("داده کامل‌تر شهید بهشتی", () => {
     expect(shahidBeheshtiSessionPattern({ grade: "12", major: "MATH", subject: "عربی", hours: 2 })).toEqual([2]);
     expect(shahidBeheshtiSessionPattern({ grade: "10", major: "SCIENCE", subject: "عربی", hours: 2 })).toEqual([2]);
     expect(shahidBeheshtiSessionPattern({ grade: "12", major: "SCIENCE", subject: "تربیت بدنی", hours: 2 })).toEqual([1, 1]);
+    expect(shahidBeheshtiLessonRows.find((row) => row.classKey === "10-science" && row.subject === "آزمایشگاه")?.sessionPattern).toEqual([2]);
+    expect(shahidBeheshtiLessonRows.find((row) => row.classKey === "10-math" && row.subject === "آزمایشگاه")).toMatchObject({ hours: 2, sessionPattern: [1, 1] });
+    expect(shahidBeheshtiLessonRows.find((row) => row.classKey === "12-math" && row.subject === "مدیریت خانواده")).toMatchObject({ hours: 2, sessionPattern: [1, 1] });
+    expect(
+      shahidBeheshtiLessonRows
+        .filter((row) => row.subject === "مدیریت خانواده" && row.classKey !== "12-math")
+        .map((row) => shahidBeheshtiSessionPattern(row)),
+    ).toEqual([[2], [2], [2]]);
+    expect(shahidBeheshtiLessonRows.some((row) => row.classKey === "11-math" && row.subject === "ریاضی")).toBe(false);
+  });
+
+  it("سهم ۱+۲+۵ ساعت مدیریت خانواده را بدون تغییر بار ۳۵۰ ساعته قابل تقسیم نگه می‌دارد", () => {
+    const managementDemand = shahidBeheshtiLessonRows
+      .filter((row) => row.subject === "مدیریت خانواده")
+      .reduce((sum, row) => sum + row.hours, 0);
+    const managementAssignments = shahidBeheshtiTeachers
+      .map((teacher) => teacher.assignments["مدیریت خانواده"] ?? 0)
+      .filter((hours) => hours > 0)
+      .sort((left, right) => left - right);
+
+    expect(managementDemand).toBe(8);
+    expect(managementAssignments).toEqual([1, 2, 5]);
+    expect(managementAssignments.reduce((sum, hours) => sum + hours, 0)).toBe(
+      managementDemand,
+    );
+    expect(shahidBeheshtiLessonRows.reduce((sum, row) => sum + row.hours, 0)).toBe(350);
   });
 
   it("تقسیم نیاز درسی میان چند دبیر را بدون تغییر مجموع درس نگه می‌دارد", () => {
@@ -175,9 +212,10 @@ describe("داده کامل‌تر شهید بهشتی", () => {
     expect(attendance["mohammadreza-hemmati"]).toEqual([0, 2]);
     expect(attendance["alireza-salimi"]).toEqual([0, 4]);
     expect(attendance["rasoul-janjaneh"]).toEqual([3, 4]);
+    expect(attendance["majid-khani"]).toEqual([2, 3, 4]);
   });
 
-  it("موظفی و اضافه‌کار نهایی ۲۱ دبیر را دقیقاً به ۳۴۹ ساعت قابل‌زمان‌بندی می‌رساند", () => {
+  it("موظفی و اضافه‌کار تأییدشده معاون را دقیقاً به ۳۵۰ ساعت قابل‌زمان‌بندی می‌رساند", () => {
     const profiles = Object.fromEntries(
       shahidBeheshtiTeachers.map((teacher) => [
         teacher.key,
@@ -187,7 +225,7 @@ describe("داده کامل‌تر شهید بهشتی", () => {
     expect(profiles).toEqual({
       "amir-chogini": [28, 24, 4],
       "abolfazl-jamshidi": [28, 24, 4],
-      "seyed-mohammad-hosseini": [27, 24, 3],
+      "seyed-mohammad-hosseini": [28, 24, 4],
       "esmail-hamzeh": [28, 24, 4],
       "abbas-nazari": [21, 20, 1],
       "ashkan-zand": [18, 18, 0],
@@ -208,20 +246,42 @@ describe("داده کامل‌تر شهید بهشتی", () => {
       "ali-raziei": [6, 6, 0],
     });
     expect(shahidBeheshtiTeachers.reduce((sum, teacher) => sum + teacher.requiredWorkload, 0)).toBe(272);
-    expect(shahidBeheshtiTeachers.reduce((sum, teacher) => sum + teacher.overtimeAllowance, 0)).toBe(77);
-    expect(shahidBeheshtiTeachers.reduce((sum, teacher) => sum + teacher.workload, 0)).toBe(349);
+    expect(shahidBeheshtiTeachers.reduce((sum, teacher) => sum + teacher.overtimeAllowance, 0)).toBe(78);
+    expect(shahidBeheshtiTeachers.reduce((sum, teacher) => sum + teacher.workload, 0)).toBe(350);
   });
 
-  it("با شکستن عربی دوازدهم تجربی و قواعد تربیت بدنی، پیش‌بررسی را بدون خطا می‌گذراند", () => {
+  it("با الگوهای جلسه تأییدشده، پیش‌بررسی را بدون خطا می‌گذراند", () => {
     const result = runPreflight(makeCompleteShahidProblem());
     expect(result.summary).toMatchObject({
       classCount: 10,
       teacherCount: 21,
-      weeklyHours: 349,
+      weeklyHours: 350,
+      sessionCount: 222,
       errorCount: 0,
     });
     expect(result.canGenerate).toBe(true);
     expect(result.issues.filter((issue) => issue.severity === "ERROR")).toEqual([]);
+  });
+
+  it("ناسازگاری قدیم مدیریت خانواده با سهم‌های ۱، ۲ و ۵ ساعته را پیش از solver گزارش می‌کند", () => {
+    const problem = makeCompleteShahidProblem();
+    const requirement = problem.curriculum.find(
+      (item) =>
+        item.classId === "12-math" && item.subjectName === "مدیریت خانواده",
+    );
+    expect(requirement).toBeDefined();
+    requirement!.sessionPattern = [2];
+
+    const result = runPreflight(problem);
+
+    expect(result.canGenerate).toBe(false);
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({
+        code: "INCOMPATIBLE_SUBJECT_ALLOCATION_GRANULARITY",
+        severity: "ERROR",
+        message: expect.stringContaining("مدیریت خانواده"),
+      }),
+    );
   });
 
   it("از داده خام و قواعد تأییدشده برنامه معتبر شهید بهشتی می‌سازد", async () => {
@@ -230,12 +290,15 @@ describe("داده کامل‌تر شهید بهشتی", () => {
       maxCandidates: 1,
       timeBudgetMs: 30_000,
     });
-    expect(result.status).toBe("SUCCEEDED");
+    console.info(
+      `[shahid-beheshti-solver] status=${result.status} elapsed=${result.elapsedMs}ms nodes=${result.exploredNodes} signature=${result.candidates[0] ? createHash("sha256").update(result.candidates[0].signature).digest("hex").slice(0, 16) : "none"}`,
+    );
+    expect(result.status, result.issues.map((issue) => issue.message).join(" | ")).toBe("SUCCEEDED");
     expect(result.candidates).toHaveLength(1);
     expect(validateSchedule(problem, result.candidates[0].assignments).filter((issue) => issue.severity === "ERROR")).toEqual([]);
   }, 40_000);
 
-  it("توزیع برگه A4 را بدون استفاده از جدول نهایی نگه می‌دارد", () => {
+  it("تخصیص اصلاح‌شده معاون را مستقل از جدول نهایی نگه می‌دارد", () => {
     expect(shahidBeheshtiTeachers.find((teacher) => teacher.key === "morteza-soltani")).toMatchObject({
       firstName: "مرتضی",
       lastName: "سلطانی",
@@ -245,8 +308,8 @@ describe("داده کامل‌تر شهید بهشتی", () => {
     });
     expect(shahidBeheshtiTeachers.some((teacher) => teacher.key === "hashemi")).toBe(false);
     expect(shahidBeheshtiTeachers.find((teacher) => teacher.key === "hamid-vesali")?.workload).toBe(21);
-    expect(shahidBeheshtiTeachers.find((teacher) => teacher.key === "mohammadreza-salimi")?.assignments["آمادگی دفاعی"]).toBe(1);
-    expect(shahidBeheshtiTeachers.find((teacher) => teacher.key === "alireza-salimi")?.assignments["ریاضی"]).toBe(1);
+    expect(shahidBeheshtiTeachers.find((teacher) => teacher.key === "mohammadreza-salimi")?.assignments["آزمایشگاه"]).toBe(1);
+    expect(shahidBeheshtiTeachers.find((teacher) => teacher.key === "alireza-salimi")?.assignments["آزمایشگاه"]).toBe(1);
   });
 });
 

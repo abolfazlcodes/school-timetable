@@ -363,7 +363,7 @@ try {
           ? teacher.overtimeAllowance
           : 0;
         await transaction`INSERT INTO teacher_year_profiles (school_id, academic_year_id, teacher_id, minimum_workload, required_workload, maximum_workload, overtime_allowance, daily_minimum, daily_maximum, max_consecutive)
-          VALUES (${target.schoolId}, ${target.yearId}, ${teacherId}, ${requiredWorkload}, ${requiredWorkload}, ${requiredWorkload}, ${overtimeAllowance}, 0, 4, 4)
+          VALUES (${target.schoolId}, ${target.yearId}, ${teacherId}, ${requiredWorkload}, ${requiredWorkload}, ${requiredWorkload}, ${overtimeAllowance}, 0, ${"dailyMaximum" in teacher ? teacher.dailyMaximum : 4}, ${"maxConsecutive" in teacher ? teacher.maxConsecutive : 4})
           ON CONFLICT (academic_year_id, teacher_id) DO UPDATE SET minimum_workload = excluded.minimum_workload, required_workload = excluded.required_workload, maximum_workload = excluded.maximum_workload, overtime_allowance = excluded.overtime_allowance, daily_maximum = excluded.daily_maximum, max_consecutive = excluded.max_consecutive, updated_at = now()`;
         await transaction`INSERT INTO teacher_availability (school_id, academic_year_id, teacher_id, school_day_id, period_id, status)
           SELECT ${target.schoolId}, ${target.yearId}, ${teacherId}, period.school_day_id, period.id,

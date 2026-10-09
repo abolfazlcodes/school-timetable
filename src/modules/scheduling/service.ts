@@ -23,7 +23,7 @@ export function fingerprintProblem(problem: SchedulingProblem) { return createHa
 export async function generateTimetable(context: TenantContext, repository: SchedulingRepository) {
   const inspection = await inspectSchedulingData(context, repository);
   if (!inspection.problem || !inspection.preflight.canGenerate) return { ok: false as const, issues: inspection.preflight.issues };
-  const result = await solveSchedule(inspection.problem, { maxCandidates: 3, nodeBudget: 150_000, timeBudgetMs: 30_000 });
+  const result = await solveSchedule(inspection.problem, { maxCandidates: 3, timeBudgetMs: 30_000 });
   const runId = await repository.saveRun(context, { problem: inspection.problem, fingerprint: fingerprintProblem(inspection.problem), engineVersion: ENGINE_VERSION, result, summary: inspection.preflight.summary });
   return { ok: true as const, runId, result };
 }

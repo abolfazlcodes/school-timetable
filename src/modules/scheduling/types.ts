@@ -28,8 +28,11 @@ export interface ProblemClass {
   name: string;
   gradeId: string;
   gradeName: string;
+  gradeCode?: string;
+  gradeOrder?: number;
   majorId: string | null;
   majorName: string | null;
+  majorCode?: string | null;
 }
 export interface CurriculumRequirement {
   id: string;
@@ -126,7 +129,6 @@ export interface ScheduleCandidate {
 }
 export interface SolverOptions {
   maxCandidates?: number;
-  nodeBudget?: number;
   timeBudgetMs?: number;
 }
 export interface SolverResult {

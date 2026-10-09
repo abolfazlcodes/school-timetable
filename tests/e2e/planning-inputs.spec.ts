@@ -308,7 +308,7 @@ test("الگوی اختصاصی عربی دوازدهم تجربی قابل تن
 
   await page.goto("/planning?step=review");
   await expect(page.getByText("اطلاعات برای تولید برنامه آماده است")).toBeVisible();
-  await expect(page.locator(".preflight-metrics")).toContainText("۳۴۹");
+  await expect(page.locator(".preflight-metrics")).toContainText("۳۵۰");
   await expect(page.locator(".preflight-metrics")).toContainText("۲۱");
   await expect(page.locator(".preflight-metrics")).toContainText("۱۰");
   await page.getByRole("link", { name: "ادامه به تولید برنامه" }).click();

@@ -78,4 +78,77 @@ describe("پیش‌بررسی زمان‌بندی", () => {
       message: expect.stringMatching(/۸.*۶/),
     }));
   });
+
+  it("تقسیم هم‌زمان قطعه‌های جلسه میان همه تخصیص‌های دقیق دبیران را بررسی می‌کند", () => {
+    const problem = makeProblem();
+    problem.periods = problem.periods.map((period, index) => ({
+      ...period,
+      instructionalUnits: index < 3 ? 2 : 1,
+    }));
+    problem.curriculum = [
+      { id: "r1", classId: "c1", className: "دهم ۱", subjectId: "math", subjectName: "ریاضی", weeklyHours: 1, sessionPattern: [1] },
+      { id: "r2", classId: "c1", className: "دهم ۱", subjectId: "math", subjectName: "ریاضی", weeklyHours: 2, sessionPattern: [2] },
+      { id: "r3", classId: "c2", className: "دهم ۲", subjectId: "math", subjectName: "ریاضی", weeklyHours: 2, sessionPattern: [2] },
+      { id: "r4", classId: "c2", className: "دهم ۲", subjectId: "math", subjectName: "ریاضی", weeklyHours: 2, sessionPattern: [2] },
+    ];
+    const availability = Object.fromEntries(
+      problem.periods.map((period) => [period.id, "AVAILABLE"]),
+    ) as (typeof problem.teachers)[number]["availability"];
+    problem.teachers = [1, 1, 1, 4].map((hours, index) => ({
+      ...problem.teachers[0],
+      id: `t${index + 1}`,
+      name: `دبیر ${index + 1}`,
+      subjectAssignments: [{ subjectId: "math", assignedWeeklyHours: hours }],
+      requiredWorkload: hours,
+      maximumWorkload: hours,
+      dailyMaximum: 6,
+      maxConsecutive: 6,
+      availability,
+    }));
+
+    const result = runPreflight(problem);
+
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: "INCOMPATIBLE_SUBJECT_ALLOCATION_GRANULARITY",
+      severity: "ERROR",
+      fixHref: "/planning?step=curriculum",
+      message: expect.stringMatching(/الگوی جلسات.*ساعت تخصیص دبیران/),
+    }));
+    expect(result.canGenerate).toBe(false);
+  });
+
+  it("با خرد شدن یک جلسه، همان تخصیص مشترک را قابل تقسیم می‌داند", () => {
+    const problem = makeProblem();
+    problem.periods = problem.periods.map((period, index) => ({
+      ...period,
+      instructionalUnits: index < 3 ? 2 : 1,
+    }));
+    problem.curriculum = [
+      { id: "r1", classId: "c1", className: "دهم ۱", subjectId: "math", subjectName: "ریاضی", weeklyHours: 1, sessionPattern: [1] },
+      { id: "r2", classId: "c1", className: "دهم ۱", subjectId: "math", subjectName: "ریاضی", weeklyHours: 2, sessionPattern: [1, 1] },
+      { id: "r3", classId: "c2", className: "دهم ۲", subjectId: "math", subjectName: "ریاضی", weeklyHours: 2, sessionPattern: [2] },
+      { id: "r4", classId: "c2", className: "دهم ۲", subjectId: "math", subjectName: "ریاضی", weeklyHours: 2, sessionPattern: [2] },
+    ];
+    const availability = Object.fromEntries(
+      problem.periods.map((period) => [period.id, "AVAILABLE"]),
+    ) as (typeof problem.teachers)[number]["availability"];
+    problem.teachers = [1, 1, 1, 4].map((hours, index) => ({
+      ...problem.teachers[0],
+      id: `t${index + 1}`,
+      name: `دبیر ${index + 1}`,
+      subjectAssignments: [{ subjectId: "math", assignedWeeklyHours: hours }],
+      requiredWorkload: hours,
+      maximumWorkload: hours,
+      dailyMaximum: 6,
+      maxConsecutive: 6,
+      availability,
+    }));
+
+    const result = runPreflight(problem);
+
+    expect(result.issues.some(
+      (issue) => issue.code === "INCOMPATIBLE_SUBJECT_ALLOCATION_GRANULARITY",
+    )).toBe(false);
+    expect(result.canGenerate).toBe(true);
+  });
 });

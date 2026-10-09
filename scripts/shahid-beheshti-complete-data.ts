@@ -239,11 +239,10 @@ export const shahidBeheshtiLessonRows: CompleteLessonRow[] = [
     ["نگارش", 2, "ali-raziei"],
     ["عربی", 2, "mohammadreza-hemmati"],
     ["زبان انگلیسی", 3, "hossein-farahani"],
-    // طبق تصمیم موقت مستقیم کاربر، این یک ساعت تا تعیین دبیر پوشش‌دهنده
-    // جزو نیاز قابل‌زمان‌بندی نیست و در خروجی به‌صورت خانه خالی می‌ماند.
+    ["آزمایشگاه", 2, "alireza-salimi"],
     ["فیزیک", 4, "peyman-karami"],
     ["شیمی", 3, "rohollah-ahmadi"],
-    ["ریاضی", 5, "mohammadreza-salimi"],
+    ["ریاضی", 4, "mohammadreza-salimi"],
     ["هندسه", 2, "alireza-salimi"],
     ["تربیت بدنی", 2, "abolfazl-khalili"],
     ["جغرافیا", 2, "abbas-nazari"],
@@ -262,11 +261,11 @@ export const shahidBeheshtiLessonRows: CompleteLessonRow[] = [
     ["آمار و احتمال", 2, "alireza-salimi"],
     ["هندسه", 2, "seyed-mohammad-hosseini"],
     ["حسابان", 3, "seyed-mohammad-hosseini"],
-    ["زمین‌شناسی", 3, "mohammadreza-salimi"],
+    ["زمین‌شناسی", 2, "mohammadreza-salimi"],
     ["تاریخ معاصر", 2, "rasoul-janjaneh"],
     ["تربیت بدنی", 2, "abolfazl-khalili"],
     ["انسان و محیط زیست", 2, "mohammadreza-hemmati"],
-    ["کارآفرینی", 1, "rasoul-janjaneh"],
+    ["کارآفرینی", 2, "rasoul-janjaneh"],
   ]),
   ...lessons("12-math", "12", "MATH", [
     ["دین و زندگی", 2, "ashkan-zand"],
@@ -298,12 +297,12 @@ const splitTeacherAllocations = [
   },
   {
     classKey: "10-math",
-    subject: "ریاضی",
+    subject: "آزمایشگاه",
     allocations: [
-      { teacherKey: "mohammadreza-salimi", hours: 4 },
       { teacherKey: "alireza-salimi", hours: 1 },
+      { teacherKey: "mohammadreza-salimi", hours: 1 },
     ],
-    sessionPattern: [2, 2, 1],
+    sessionPattern: [1, 1],
   },
   {
     classKey: "12-science",
@@ -342,6 +341,28 @@ for (const split of splitTeacherAllocations) {
   row.teacherAllocations = split.allocations;
   if (split.sessionPattern) row.sessionPattern = split.sessionPattern;
 }
+
+// معاون در نسخهٔ عملیاتی آزمایشگاه دهم تجربی را یک جلسهٔ پیوسته ثبت کرده است.
+// قابلیت شکستن همچنان در UI قابل تغییر است و آزمایشگاه دهم ریاضی با الگوی ۱+۱
+// وارد می‌شود.
+const tenthScienceLab = shahidBeheshtiLessonRows.find(
+  (item) => item.classKey === "10-science" && item.subject === "آزمایشگاه",
+);
+if (!tenthScienceLab) throw new Error("نیاز آزمایشگاه دهم تجربی پیدا نشد.");
+tenthScienceLab.sessionPattern = [2];
+
+// این استثنا فقط متعلق به برنامهٔ ۱۴۰۵–۱۴۰۶ شهید بهشتی است: سهم‌های سالانهٔ
+// مدیریت خانواده (۱، ۲ و ۵ ساعت) تنها وقتی دقیقاً قابل تخصیص‌اند که ردیف
+// دوازدهم ریاضی به دو جلسهٔ یک‌ساعته شکسته شود. مدارس و سال‌های دیگر الگوی
+// ذخیره‌شدهٔ curriculum خودشان را دارند و از این override استفاده نمی‌کنند.
+const twelfthMathFamilyManagement = shahidBeheshtiLessonRows.find(
+  (item) =>
+    item.classKey === "12-math" && item.subject === "مدیریت خانواده",
+);
+if (!twelfthMathFamilyManagement) {
+  throw new Error("نیاز مدیریت خانواده دوازدهم ریاضی پیدا نشد.");
+}
+twelfthMathFamilyManagement.sessionPattern = [1, 1];
 
 const teacherIdentity = {
   "amir-chogini": ["امیر", "چگینی"],
@@ -388,57 +409,80 @@ const attendanceDays: Record<keyof typeof teacherIdentity, readonly number[]> =
     "morteza-soltani": [1, 4],
     "rohollah-ahmadi": [0, 1, 2],
     "hossein-farahani": [3],
-    "majid-khani": [1, 2, 3, 4],
+    "majid-khani": [2, 3, 4],
     "ali-asadi": [0, 1, 2, 3, 4],
     "ali-raziei": [0, 1, 2, 3, 4],
   };
 
 const finalWorkloadProfiles: Record<
   keyof typeof teacherIdentity,
-  { requiredWorkload: number; overtimeAllowance: number }
+  {
+    requiredWorkload: number;
+    overtimeAllowance: number;
+    dailyMaximum: number;
+    maxConsecutive: number;
+  }
 > = {
-  "amir-chogini": { requiredWorkload: 24, overtimeAllowance: 4 },
-  "abolfazl-jamshidi": { requiredWorkload: 24, overtimeAllowance: 4 },
-  "seyed-mohammad-hosseini": { requiredWorkload: 24, overtimeAllowance: 3 },
-  "esmail-hamzeh": { requiredWorkload: 24, overtimeAllowance: 4 },
-  "abbas-nazari": { requiredWorkload: 20, overtimeAllowance: 1 },
-  "ashkan-zand": { requiredWorkload: 18, overtimeAllowance: 0 },
-  "peyman-karami": { requiredWorkload: 12, overtimeAllowance: 2 },
-  "mohammadreza-hemmati": { requiredWorkload: 12, overtimeAllowance: 2 },
-  "alireza-salimi": { requiredWorkload: 12, overtimeAllowance: 2 },
-  "mohammadreza-salimi": { requiredWorkload: 12, overtimeAllowance: 2 },
-  "rasoul-janjaneh": { requiredWorkload: 12, overtimeAllowance: 2 },
-  "rashid-janjaneh": { requiredWorkload: 12, overtimeAllowance: 2 },
-  "abolfazl-khalili": { requiredWorkload: 18, overtimeAllowance: 2 },
-  "hamid-vesali": { requiredWorkload: 0, overtimeAllowance: 21 },
-  "hamid-bagheri": { requiredWorkload: 6, overtimeAllowance: 0 },
-  "morteza-soltani": { requiredWorkload: 12, overtimeAllowance: 2 },
-  "rohollah-ahmadi": { requiredWorkload: 6, overtimeAllowance: 15 },
-  "hossein-farahani": { requiredWorkload: 6, overtimeAllowance: 0 },
-  "majid-khani": { requiredWorkload: 6, overtimeAllowance: 9 },
-  "ali-asadi": { requiredWorkload: 6, overtimeAllowance: 0 },
-  "ali-raziei": { requiredWorkload: 6, overtimeAllowance: 0 },
+  "amir-chogini": { requiredWorkload: 24, overtimeAllowance: 4, dailyMaximum: 7, maxConsecutive: 7 },
+  "abolfazl-jamshidi": { requiredWorkload: 24, overtimeAllowance: 4, dailyMaximum: 7, maxConsecutive: 7 },
+  "seyed-mohammad-hosseini": { requiredWorkload: 24, overtimeAllowance: 4, dailyMaximum: 7, maxConsecutive: 7 },
+  "esmail-hamzeh": { requiredWorkload: 24, overtimeAllowance: 4, dailyMaximum: 7, maxConsecutive: 7 },
+  "abbas-nazari": { requiredWorkload: 20, overtimeAllowance: 1, dailyMaximum: 7, maxConsecutive: 7 },
+  "ashkan-zand": { requiredWorkload: 18, overtimeAllowance: 0, dailyMaximum: 6, maxConsecutive: 6 },
+  "peyman-karami": { requiredWorkload: 12, overtimeAllowance: 2, dailyMaximum: 7, maxConsecutive: 7 },
+  "mohammadreza-hemmati": { requiredWorkload: 12, overtimeAllowance: 2, dailyMaximum: 7, maxConsecutive: 7 },
+  "alireza-salimi": { requiredWorkload: 12, overtimeAllowance: 2, dailyMaximum: 7, maxConsecutive: 7 },
+  "mohammadreza-salimi": { requiredWorkload: 12, overtimeAllowance: 2, dailyMaximum: 7, maxConsecutive: 7 },
+  "rasoul-janjaneh": { requiredWorkload: 12, overtimeAllowance: 2, dailyMaximum: 7, maxConsecutive: 7 },
+  "rashid-janjaneh": { requiredWorkload: 12, overtimeAllowance: 2, dailyMaximum: 7, maxConsecutive: 7 },
+  "abolfazl-khalili": { requiredWorkload: 18, overtimeAllowance: 2, dailyMaximum: 7, maxConsecutive: 7 },
+  "hamid-vesali": { requiredWorkload: 0, overtimeAllowance: 21, dailyMaximum: 7, maxConsecutive: 7 },
+  "hamid-bagheri": { requiredWorkload: 6, overtimeAllowance: 0, dailyMaximum: 6, maxConsecutive: 6 },
+  "morteza-soltani": { requiredWorkload: 12, overtimeAllowance: 2, dailyMaximum: 7, maxConsecutive: 7 },
+  "rohollah-ahmadi": { requiredWorkload: 6, overtimeAllowance: 15, dailyMaximum: 7, maxConsecutive: 7 },
+  "hossein-farahani": { requiredWorkload: 6, overtimeAllowance: 0, dailyMaximum: 6, maxConsecutive: 6 },
+  "majid-khani": { requiredWorkload: 6, overtimeAllowance: 9, dailyMaximum: 7, maxConsecutive: 7 },
+  "ali-asadi": { requiredWorkload: 6, overtimeAllowance: 0, dailyMaximum: 6, maxConsecutive: 6 },
+  "ali-raziei": { requiredWorkload: 6, overtimeAllowance: 0, dailyMaximum: 6, maxConsecutive: 6 },
+};
+
+/** تخصیص سالانه‌ای که معاون در نسخهٔ آزمایشی تأیید و اصلاح کرده است. */
+const finalTeacherAssignments: Record<
+  keyof typeof teacherIdentity,
+  Readonly<Record<string, number>>
+> = {
+  "amir-chogini": { "فارسی": 16, "فنون ادبی": 8, "نگارش": 4 },
+  "abolfazl-jamshidi": { "زبان انگلیسی": 28 },
+  "seyed-mohammad-hosseini": { "تربیت بدنی": 1, "حسابان": 6, "ریاضی": 8, "ریاضیات گسسته": 2, "فیزیک": 7, "هندسه": 4 },
+  "esmail-hamzeh": { "اقتصاد": 2, "جامعه‌شناسی": 11, "سلامت و بهداشت": 8, "علوم اجتماعی": 2, "مطالعات فرهنگی": 4, "نگارش": 1 },
+  "abbas-nazari": { "انسان و محیط زیست": 4, "تفکر و سواد رسانه": 2, "جغرافیا": 13, "مدیریت خانواده": 1, "نگارش": 1 },
+  "ashkan-zand": { "دین و زندگی": 8, "روان‌شناسی": 2, "فلسفه": 6, "منطق": 2 },
+  "peyman-karami": { "فیزیک": 14 },
+  "mohammadreza-hemmati": { "انسان و محیط زیست": 2, "تفکر و سواد رسانه": 2, "عربی": 6, "مدیریت خانواده": 2, "نگارش": 2 },
+  "alireza-salimi": { "آزمایشگاه": 1, "آمار و احتمال": 2, "ریاضی و آمار": 9, "هندسه": 2 },
+  "mohammadreza-salimi": { "آزمایشگاه": 1, "ریاضی": 8, "زمین‌شناسی": 4, "کارآفرینی": 1 },
+  "rasoul-janjaneh": { "تاریخ": 7, "تاریخ معاصر": 4, "کارآفرینی": 3 },
+  "rashid-janjaneh": { "عربی": 14 },
+  "abolfazl-khalili": { "تربیت بدنی": 18, "نگارش": 2 },
+  "hamid-vesali": { "آمادگی دفاعی": 9, "دین و زندگی": 7, "مدیریت خانواده": 5 },
+  "hamid-bagheri": { "فارسی": 4, "نگارش": 2 },
+  "morteza-soltani": { "آزمایشگاه": 3, "زیست‌شناسی": 11 },
+  "rohollah-ahmadi": { "آزمایشگاه": 1, "شیمی": 20 },
+  "hossein-farahani": { "زبان انگلیسی": 6 },
+  "majid-khani": { "تربیت بدنی": 1, "دین و زندگی": 12, "نگارش": 2 },
+  "ali-asadi": { "تاریخ": 3, "نگارش": 3 },
+  "ali-raziei": { "تفکر و سواد رسانه": 2, "علوم اجتماعی": 2, "کارآفرینی": 2 },
 };
 
 export const shahidBeheshtiTeachers = Object.entries(teacherIdentity).map(
   ([key, [firstName, lastName]]) => {
-    const assignments: Record<string, number> = {};
-    for (const row of shahidBeheshtiLessonRows) {
-      const allocations = row.teacherAllocations ?? [
-        { teacherKey: row.teacherKey, hours: row.hours },
-      ];
-      for (const allocation of allocations.filter(
-        (item) => item.teacherKey === key,
-      )) {
-        assignments[row.subject] =
-          (assignments[row.subject] ?? 0) + allocation.hours;
-      }
-    }
+    const assignments: Readonly<Record<string, number>> =
+      finalTeacherAssignments[key as keyof typeof teacherIdentity];
     const workload = Object.values(assignments).reduce(
       (sum, hours) => sum + hours,
       0,
     );
-    const { requiredWorkload, overtimeAllowance } =
+    const { requiredWorkload, overtimeAllowance, dailyMaximum, maxConsecutive } =
       finalWorkloadProfiles[key as keyof typeof teacherIdentity];
     return {
       key,
@@ -447,6 +491,8 @@ export const shahidBeheshtiTeachers = Object.entries(teacherIdentity).map(
       workload,
       requiredWorkload,
       overtimeAllowance,
+      dailyMaximum,
+      maxConsecutive,
       attendanceDays: attendanceDays[key as keyof typeof teacherIdentity],
       assignments,
     };

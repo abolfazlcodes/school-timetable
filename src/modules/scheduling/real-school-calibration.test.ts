@@ -30,7 +30,7 @@ describe("کالیبراسیون داده واقعی ۱۴۰۵–۱۴۰۶", () =>
 
   it("حل‌گر سناریوی مرجع را با تخصیص سالانه و حضور نرمال‌شده معتبر می‌چیند", async () => {
     const problem = makeRealSchoolSolverProjection();
-    const result = await solveSchedule(problem, { maxCandidates: 1, nodeBudget: 250_000, timeBudgetMs: 3_000 });
+    const result = await solveSchedule(problem, { maxCandidates: 1, timeBudgetMs: 3_000 });
     expect(result.status).toBe("SUCCEEDED");
     expect(result.candidates).toHaveLength(1);
     expect(validateSchedule(problem, result.candidates[0].assignments).filter((issue) => issue.severity === "ERROR")).toHaveLength(0);

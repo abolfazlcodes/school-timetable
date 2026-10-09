@@ -41,7 +41,7 @@ describe("benchmark مدرسه متعارف", () => {
   it("۱۲ کلاس، ۴۸ جلسه و ۸ دبیر را در budget تولید و مستقل اعتبارسنجی می‌کند", async () => {
     const problem = makeTypicalSchool();
     const started = performance.now();
-    const result = await solveSchedule(problem, { maxCandidates: 1, nodeBudget: 250_000, timeBudgetMs: 3_000 });
+    const result = await solveSchedule(problem, { maxCandidates: 1, timeBudgetMs: 3_000 });
     const wallTimeMs = Math.round(performance.now() - started);
     expect(result.status).toBe("SUCCEEDED");
     expect(result.candidates).toHaveLength(1);

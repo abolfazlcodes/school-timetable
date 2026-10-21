@@ -1,5 +1,5 @@
 import type { ScheduleAssignment, SchedulingIssue, SchedulingProblem } from "./types";
-import { activeCycleWeeks, assignedHoursFor, compatibleWeekPatterns, expandSessions, normalizedWeekPattern } from "./types";
+import { activeCycleWeeks, alternatingSessionPairs, assignedHoursFor, compatibleWeekPatterns, expandSessions, isDirectAlternatingPair, isReciprocalAlternatingSwap, normalizedWeekPattern } from "./types";
 
 function longestRun(positions: number[]) {
   const sorted = [...new Set(positions)].sort((a, b) => a - b);
@@ -29,6 +29,7 @@ export function validateSchedule(problem: SchedulingProblem, assignments: Schedu
   const teachers = new Map(problem.teachers.map((teacher) => [teacher.id, teacher]));
   const periods = new Map(problem.periods.map((period) => [period.id, period]));
   const seenSessions = new Set<string>();
+  const assignmentsBySession = new Map<string, ScheduleAssignment>();
   const classSlots = new Map<string, string>();
   const teacherSlots = new Map<string, string>();
   const teacherLoads = new Map<string, number>();
@@ -36,6 +37,21 @@ export function validateSchedule(problem: SchedulingProblem, assignments: Schedu
   const teacherDayPositions = new Map<string, number[]>();
   const classDayPositions = new Map<string, number[]>();
   const curriculumDays = new Map<string, { dayId: string; sessionId: string; week: "A" | "B" }[]>();
+  const weeklySchoolCapacity = problem.periods.reduce(
+    (sum, period) => sum + period.instructionalUnits,
+    0,
+  );
+  const fullClasses = new Set(
+    problem.classes
+      .filter(
+        (schoolClass) =>
+          [...sessions.values()]
+            .filter((session) => session.classId === schoolClass.id)
+            .reduce((sum, session) => sum + session.workloadHours, 0) ===
+          weeklySchoolCapacity,
+      )
+      .map((schoolClass) => schoolClass.id),
+  );
 
   for (const assignment of assignments) {
     const session = sessions.get(assignment.sessionId);
@@ -48,6 +64,7 @@ export function validateSchedule(problem: SchedulingProblem, assignments: Schedu
       issues.push({ code: "DUPLICATE_SESSION", severity: "ERROR", message: `جلسه «${session.subjectName}» برای «${session.className}» بیش از یک‌بار قرار گرفته است.`, entityType: "session", entityId: session.id });
     }
     seenSessions.add(session.id);
+    assignmentsBySession.set(session.id, assignment);
     if (!teacher || assignedHoursFor(teacher, session.subjectId) <= 0) {
       issues.push({ code: "INVALID_TEACHER", severity: "ERROR", message: `دبیر انتخاب‌شده برای درس «${session.subjectName}» مجاز نیست.`, entityType: "session", entityId: session.id });
       continue;
@@ -110,6 +127,104 @@ export function validateSchedule(problem: SchedulingProblem, assignments: Schedu
       classDayPositions.set(classDayKey, [...(classDayPositions.get(classDayKey) ?? []), ...validPositions]);
       curriculumDays.set(session.curriculumId, [...(curriculumDays.get(session.curriculumId) ?? []), { dayId: assignment.dayId, sessionId: session.id, week }]);
     }
+  }
+
+  for (const [first, second] of alternatingSessionPairs([...sessions.values()])) {
+    const firstAssignment = assignmentsBySession.get(first.id);
+    const secondAssignment = assignmentsBySession.get(second.id);
+    if (!firstAssignment || !secondAssignment) continue;
+    const firstWeek = normalizedWeekPattern(firstAssignment);
+    const secondWeek = normalizedWeekPattern(secondAssignment);
+    const isComplementary =
+      (firstWeek === "WEEK_A" && secondWeek === "WEEK_B") ||
+      (firstWeek === "WEEK_B" && secondWeek === "WEEK_A");
+    const firstPeriod = periods.get(firstAssignment.periodIds[0]);
+    const secondPeriod = periods.get(secondAssignment.periodIds[0]);
+    const isAlternatingInOneSlot =
+      firstAssignment.dayId === secondAssignment.dayId &&
+      firstAssignment.periodIds[0] === secondAssignment.periodIds[0] &&
+      isComplementary;
+    const isTwoFixedWeeklySlots =
+      firstWeek === "EVERY_WEEK" &&
+      secondWeek === "EVERY_WEEK" &&
+      firstPeriod?.instructionalUnits === 1 &&
+      secondPeriod?.instructionalUnits === 1;
+    if (!isAlternatingInOneSlot && !isTwoFixedWeeklySlots) {
+      issues.push({
+        code: "ALTERNATING_SESSIONS_NOT_COLOCATED",
+        severity: "ERROR",
+        message: `دو بخش یک‌ساعتهٔ «${first.subjectName}» کلاس «${first.className}» باید یا در دو زنگ یک‌ساعتهٔ هفتگی، یا در یک زنگ دوساعته و دو هفتهٔ متناوب قرار گیرند.`,
+        entityType: "subject",
+        entityId: first.subjectId,
+      });
+    }
+  }
+
+  const alternatingSlots = new Map<
+    string,
+    { weekA: ScheduleAssignment[]; weekB: ScheduleAssignment[] }
+  >();
+  for (const assignment of assignments) {
+    const pattern = normalizedWeekPattern(assignment);
+    const periodId = assignment.periodIds[0];
+    if (
+      (pattern !== "WEEK_A" && pattern !== "WEEK_B") ||
+      periods.get(periodId)?.instructionalUnits !== 2
+    ) {
+      continue;
+    }
+    const key = `${assignment.classId}\u0000${periodId}`;
+    const slot = alternatingSlots.get(key) ?? { weekA: [], weekB: [] };
+    slot[pattern === "WEEK_A" ? "weekA" : "weekB"].push(assignment);
+    alternatingSlots.set(key, slot);
+  }
+  for (const [key, slot] of alternatingSlots) {
+    const [classId, periodId] = key.split("\u0000");
+    if (
+      fullClasses.has(classId) &&
+      (slot.weekA.length !== 1 || slot.weekB.length !== 1)
+    ) {
+      issues.push({
+        code: "ALTERNATING_SLOT_INCOMPLETE",
+        severity: "ERROR",
+        message: "زنگ دوساعتهٔ یک‌هفته‌درمیان باید در هر دو هفته برای کلاس درس داشته باشد.",
+        entityType: "class",
+        entityId: classId,
+      });
+      continue;
+    }
+    if (slot.weekA.length !== 1 || slot.weekB.length !== 1) continue;
+    const weekA = slot.weekA[0];
+    const weekB = slot.weekB[0];
+    if (isDirectAlternatingPair(weekA, weekB)) continue;
+    const hasReciprocalSwap = [...alternatingSlots.entries()].some(
+      ([candidateKey, candidateSlot]) => {
+        const [candidateClassId, candidatePeriodId] =
+          candidateKey.split("\u0000");
+        return (
+          candidateClassId !== classId &&
+          candidatePeriodId === periodId &&
+          candidateSlot.weekA.length === 1 &&
+          candidateSlot.weekB.length === 1 &&
+          isReciprocalAlternatingSwap(
+            weekA,
+            weekB,
+            candidateSlot.weekA[0],
+            candidateSlot.weekB[0],
+          )
+        );
+      },
+    );
+    if (hasReciprocalSwap) continue;
+    const firstSession = sessions.get(weekA.sessionId);
+    const secondSession = sessions.get(weekB.sessionId);
+    issues.push({
+      code: "ALTERNATING_LESSONS_REQUIRE_RECIPROCAL_SWAP",
+      severity: "ERROR",
+      message: `تناوب «${firstSession?.subjectName ?? "درس"}» و «${secondSession?.subjectName ?? "درس"}» با دو دبیر متفاوت فقط همراه تعویض متقابل همان دو درس و دبیر در یک کلاس دیگر مجاز است.`,
+      entityType: "class",
+      entityId: classId,
+    });
   }
 
   for (const session of sessions.values()) {

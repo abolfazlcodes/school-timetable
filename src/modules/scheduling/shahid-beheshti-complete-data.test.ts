@@ -1,5 +1,4 @@
 // @vitest-environment node
-import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   shahidBeheshtiClasses,
@@ -11,7 +10,7 @@ import {
 import { makeProblem } from "./fixtures.test-helper";
 import { runPreflight } from "./preflight";
 import { solveSchedule } from "./solver";
-import type { SchedulingProblem } from "./types";
+import { expandSessions, type SchedulingProblem } from "./types";
 import { validateSchedule } from "./validator";
 
 function makeCompleteShahidProblem(): SchedulingProblem {
@@ -46,6 +45,14 @@ function makeCompleteShahidProblem(): SchedulingProblem {
     subjectName: row.subject,
     weeklyHours: row.hours,
     sessionPattern: [...shahidBeheshtiSessionPattern(row)],
+    teacherAllocations: (
+      row.teacherAllocations ?? [
+        { teacherKey: row.teacherKey, hours: row.hours },
+      ]
+    ).map((allocation) => ({
+      teacherId: allocation.teacherKey,
+      assignedWeeklyHours: allocation.hours,
+    })),
     assignedTeacherId: null,
   }));
   const teachers = shahidBeheshtiTeachers.map((teacher) => ({
@@ -122,11 +129,14 @@ describe("داده کامل‌تر شهید بهشتی", () => {
         (sum, row) => sum + shahidBeheshtiSessionPattern(row).length,
         0,
       ),
-    ).toBe(222);
+    ).toBe(214);
     const humanities12 = shahidBeheshtiCurriculum.filter((row) => row.grade === "12" && row.major === "HUMANITIES");
     expect(humanities12.reduce((sum, row) => sum + row.hours, 0)).toBe(35);
-    expect(shahidBeheshtiLessonRows.find((row) => row.classKey === "12-humanities-a" && row.subject === "نگارش")?.teacherKey).toBe("abbas-nazari");
-    expect(shahidBeheshtiLessonRows.find((row) => row.classKey === "12-humanities-b" && row.subject === "نگارش")?.teacherKey).toBe("amir-chogini");
+    expect(shahidBeheshtiLessonRows.find((row) => row.classKey === "12-humanities-a" && row.subject === "نگارش")?.teacherKey).toBe("amir-chogini");
+    expect(shahidBeheshtiLessonRows.find((row) => row.classKey === "12-humanities-b" && row.subject === "نگارش")?.teacherAllocations).toEqual([
+      { teacherKey: "majid-khani", hours: 1 },
+      { teacherKey: "amir-chogini", hours: 1 },
+    ]);
   });
 
   it("قاعده معاون را برای سه‌ساعته‌ها و فهرست محدود دوساعته‌های قابل شکستن اعمال می‌کند", () => {
@@ -143,11 +153,13 @@ describe("داده کامل‌تر شهید بهشتی", () => {
     for (const { row, pattern } of splittable) {
       expect(pattern).toEqual([1, 1]);
       expect(
-        ["تفکر و سواد رسانه", "تفکر و سواد رسانه‌ای", "کارآفرینی", "ریاضیات گسسته", "هویت اجتماعی", "علوم اجتماعی", "مطالعات فرهنگی", "تربیت بدنی"].includes(row.subject)
+        ["تفکر و سواد رسانه", "تفکر و سواد رسانه‌ای", "کارآفرینی", "ریاضیات گسسته", "هویت اجتماعی", "علوم اجتماعی", "مطالعات فرهنگی"].includes(row.subject)
           || (row.subject === "عربی" && row.grade === "12" && row.major === "SCIENCE")
           || (row.subject === "آزمایشگاه" && row.grade === "10")
           || (row.subject === "نگارش" && ["10", "12"].includes(row.grade))
-          || (row.subject === "مدیریت خانواده" && row.grade === "12" && row.major === "MATH"),
+          || (row.subject === "مدیریت خانواده" && row.grade === "12" && row.major === "MATH")
+          || (row.subject === "تربیت بدنی" && row.grade === "12" && row.major === "SCIENCE")
+          || (row.subject === "تربیت بدنی" && row.classKey === "12-humanities-b"),
         `${row.classKey}/${row.subject}`,
       ).toBe(true);
     }
@@ -163,6 +175,7 @@ describe("داده کامل‌تر شهید بهشتی", () => {
     expect(shahidBeheshtiSessionPattern({ grade: "12", major: "MATH", subject: "عربی", hours: 2 })).toEqual([2]);
     expect(shahidBeheshtiSessionPattern({ grade: "10", major: "SCIENCE", subject: "عربی", hours: 2 })).toEqual([2]);
     expect(shahidBeheshtiSessionPattern({ grade: "12", major: "SCIENCE", subject: "تربیت بدنی", hours: 2 })).toEqual([1, 1]);
+    expect(shahidBeheshtiSessionPattern({ grade: "12", major: "HUMANITIES", subject: "تربیت بدنی", hours: 2 })).toEqual([2]);
     expect(shahidBeheshtiLessonRows.find((row) => row.classKey === "10-science" && row.subject === "آزمایشگاه")?.sessionPattern).toEqual([2]);
     expect(shahidBeheshtiLessonRows.find((row) => row.classKey === "10-math" && row.subject === "آزمایشگاه")).toMatchObject({ hours: 2, sessionPattern: [1, 1] });
     expect(shahidBeheshtiLessonRows.find((row) => row.classKey === "12-math" && row.subject === "مدیریت خانواده")).toMatchObject({ hours: 2, sessionPattern: [1, 1] });
@@ -193,11 +206,52 @@ describe("داده کامل‌تر شهید بهشتی", () => {
 
   it("تقسیم نیاز درسی میان چند دبیر را بدون تغییر مجموع درس نگه می‌دارد", () => {
     const splitRows = shahidBeheshtiLessonRows.filter((row) => row.teacherAllocations);
-    expect(splitRows).toHaveLength(5);
+    expect(splitRows).toHaveLength(11);
     for (const row of splitRows) {
       expect(row.teacherAllocations!.reduce((sum, item) => sum + item.hours, 0)).toBe(row.hours);
       for (const allocation of row.teacherAllocations!) {
         expect(shahidBeheshtiTeachers.some((teacher) => teacher.key === allocation.teacherKey)).toBe(true);
+      }
+    }
+    expect(
+      shahidBeheshtiLessonRows.find(
+        (row) =>
+          row.classKey === "12-science" && row.subject === "تربیت بدنی",
+      )?.teacherAllocations,
+    ).toEqual([
+      { teacherKey: "seyed-mohammad-hosseini", hours: 1 },
+      { teacherKey: "abolfazl-khalili", hours: 1 },
+    ]);
+    expect(
+      shahidBeheshtiLessonRows.find(
+        (row) =>
+          row.classKey === "12-humanities-b" &&
+          row.subject === "تربیت بدنی",
+      )?.teacherAllocations,
+    ).toEqual([
+      { teacherKey: "abolfazl-khalili", hours: 1 },
+      { teacherKey: "majid-khani", hours: 1 },
+    ]);
+
+    const classAllocations = new Map<string, number>();
+    for (const row of shahidBeheshtiLessonRows) {
+      for (const allocation of
+        row.teacherAllocations ?? [
+          { teacherKey: row.teacherKey, hours: row.hours },
+        ]) {
+        const key = `${allocation.teacherKey}\u0000${row.subject}`;
+        classAllocations.set(
+          key,
+          (classAllocations.get(key) ?? 0) + allocation.hours,
+        );
+      }
+    }
+    for (const teacher of shahidBeheshtiTeachers) {
+      for (const [subject, hours] of Object.entries(teacher.assignments)) {
+        expect(
+          classAllocations.get(`${teacher.key}\u0000${subject}`) ?? 0,
+          `${teacher.key}/${subject}`,
+        ).toBe(hours);
       }
     }
   });
@@ -250,13 +304,13 @@ describe("داده کامل‌تر شهید بهشتی", () => {
     expect(shahidBeheshtiTeachers.reduce((sum, teacher) => sum + teacher.workload, 0)).toBe(350);
   });
 
-  it("با الگوهای جلسه تأییدشده، پیش‌بررسی را بدون خطا می‌گذراند", () => {
+  it("پس از ثبت تعویض متقابل تأییدشده آماده تولید برنامه است", () => {
     const result = runPreflight(makeCompleteShahidProblem());
     expect(result.summary).toMatchObject({
       classCount: 10,
       teacherCount: 21,
       weeklyHours: 350,
-      sessionCount: 222,
+      sessionCount: 214,
       errorCount: 0,
     });
     expect(result.canGenerate).toBe(true);
@@ -284,19 +338,74 @@ describe("داده کامل‌تر شهید بهشتی", () => {
     );
   });
 
-  it("از داده خام و قواعد تأییدشده برنامه معتبر شهید بهشتی می‌سازد", async () => {
+  it("بخش‌های یک‌ساعته زبان و دفاعی دهم ریاضی و انسانی یک تعویض متقابل معتبر می‌سازند", () => {
+    const problem = makeCompleteShahidProblem();
+    const result = runPreflight(problem);
+    const alternatingRows = problem.curriculum.filter(
+      (item) =>
+        ["10-math", "10-humanities"].includes(item.classId) &&
+        ["زبان انگلیسی", "آمادگی دفاعی"].includes(item.subjectName),
+    );
+    expect(alternatingRows).toHaveLength(4);
+    expect(
+      alternatingRows.map((item) => [
+        item.classId,
+        item.subjectName,
+        item.sessionPattern,
+        item.teacherAllocations,
+      ]),
+    ).toEqual(
+      expect.arrayContaining([
+        ["10-math", "زبان انگلیسی", [2, 1], [{ teacherId: "hossein-farahani", assignedWeeklyHours: 3 }]],
+        ["10-humanities", "زبان انگلیسی", [2, 1], [{ teacherId: "hossein-farahani", assignedWeeklyHours: 3 }]],
+        ["10-math", "آمادگی دفاعی", [2, 1], [{ teacherId: "hamid-vesali", assignedWeeklyHours: 3 }]],
+        ["10-humanities", "آمادگی دفاعی", [2, 1], [{ teacherId: "hamid-vesali", assignedWeeklyHours: 3 }]],
+      ]),
+    );
+    expect(result.canGenerate).toBe(true);
+  });
+
+  it("از داده مستقل شهید بهشتی برنامه معتبر می‌سازد", async () => {
     const problem = makeCompleteShahidProblem();
     const result = await solveSchedule(problem, {
       maxCandidates: 1,
-      timeBudgetMs: 30_000,
+      timeBudgetMs: 45_000,
     });
-    console.info(
-      `[shahid-beheshti-solver] status=${result.status} elapsed=${result.elapsedMs}ms nodes=${result.exploredNodes} signature=${result.candidates[0] ? createHash("sha256").update(result.candidates[0].signature).digest("hex").slice(0, 16) : "none"}`,
-    );
-    expect(result.status, result.issues.map((issue) => issue.message).join(" | ")).toBe("SUCCEEDED");
+    expect(result.status).toBe("SUCCEEDED");
     expect(result.candidates).toHaveLength(1);
-    expect(validateSchedule(problem, result.candidates[0].assignments).filter((issue) => issue.severity === "ERROR")).toEqual([]);
-  }, 40_000);
+    expect(
+      validateSchedule(problem, result.candidates[0].assignments).filter(
+        (issue) => issue.severity === "ERROR",
+      ),
+    ).toEqual([]);
+    const sessions = new Map(
+      expandSessions(problem).map((session) => [session.id, session]),
+    );
+    const reciprocalSwap = result.candidates[0].assignments.filter(
+      (assignment) => {
+        const session = sessions.get(assignment.sessionId);
+        return (
+          session?.workloadHours === 1 &&
+          ["10-math", "10-humanities"].includes(session.classId) &&
+          ["زبان انگلیسی", "آمادگی دفاعی"].includes(session.subjectName)
+        );
+      },
+    );
+    expect(reciprocalSwap).toHaveLength(4);
+    expect(new Set(reciprocalSwap.flatMap((item) => item.periodIds))).toHaveLength(1);
+    expect(new Set(reciprocalSwap.map((item) => item.weekPattern))).toEqual(
+      new Set(["WEEK_A", "WEEK_B"]),
+    );
+    for (const classId of ["10-math", "10-humanities"]) {
+      expect(
+        new Set(
+          reciprocalSwap
+            .filter((item) => item.classId === classId)
+            .map((item) => item.weekPattern),
+        ),
+      ).toEqual(new Set(["WEEK_A", "WEEK_B"]));
+    }
+  }, 60_000);
 
   it("تخصیص اصلاح‌شده معاون را مستقل از جدول نهایی نگه می‌دارد", () => {
     expect(shahidBeheshtiTeachers.find((teacher) => teacher.key === "morteza-soltani")).toMatchObject({
@@ -330,5 +439,198 @@ describe("تخصیص قطعی دبیر به کلاس", () => {
     expect(result.candidates[0].assignments.every((assignment) => assignment.teacherId === "t1")).toBe(true);
     const invalid = result.candidates[0].assignments.map((assignment, index) => index === 0 ? { ...assignment, teacherId: "t2" } : assignment);
     expect(validateSchedule(fixed, invalid)).toEqual(expect.arrayContaining([expect.objectContaining({ code: "CLASS_TEACHER_MISMATCH", severity: "ERROR" })]));
+  });
+});
+
+describe("زنگ‌های یک‌هفته‌درمیان", () => {
+  it("تناوب یک‌طرفه دو درس با دو دبیر متفاوت را رد می‌کند", () => {
+    const problem: SchedulingProblem = {
+      schoolId: "school",
+      academicYearId: "year",
+      academicYearTitle: "۱۴۰۵–۱۴۰۶",
+      classes: [{
+        id: "c1",
+        name: "یازدهم ریاضی",
+        gradeId: "11",
+        gradeName: "یازدهم",
+        majorId: "math",
+        majorName: "ریاضی",
+      }],
+      periods: [{
+        id: "p1",
+        dayId: "sun",
+        dayLabel: "یکشنبه",
+        dayOrder: 1,
+        position: 3,
+        label: "زنگ ۳",
+        startTime: "11:00",
+        endTime: "12:25",
+        instructionalUnits: 2,
+        isLast: false,
+      }],
+      curriculum: [
+        {
+          id: "lab",
+          classId: "c1",
+          className: "یازدهم ریاضی",
+          subjectId: "lab",
+          subjectName: "آزمایشگاه",
+          weeklyHours: 1,
+          sessionPattern: [1],
+          teacherAllocations: [{ teacherId: "t1", assignedWeeklyHours: 1 }],
+        },
+        {
+          id: "writing",
+          classId: "c1",
+          className: "یازدهم ریاضی",
+          subjectId: "writing",
+          subjectName: "نگارش",
+          weeklyHours: 1,
+          sessionPattern: [1],
+          teacherAllocations: [{ teacherId: "t2", assignedWeeklyHours: 1 }],
+        },
+      ],
+      teachers: [
+        {
+          id: "t1",
+          name: "دبیر آزمایشگاه",
+          profileConfigured: true,
+          subjectAssignments: [{ subjectId: "lab", assignedWeeklyHours: 1 }],
+          minimumWorkload: 0,
+          requiredWorkload: 1,
+          maximumWorkload: 1,
+          overtimeAllowance: 0,
+          dailyMaximum: 1,
+          maxConsecutive: 1,
+          availability: { p1: "AVAILABLE" },
+        },
+        {
+          id: "t2",
+          name: "دبیر نگارش",
+          profileConfigured: true,
+          subjectAssignments: [{ subjectId: "writing", assignedWeeklyHours: 1 }],
+          minimumWorkload: 0,
+          requiredWorkload: 1,
+          maximumWorkload: 1,
+          overtimeAllowance: 0,
+          dailyMaximum: 1,
+          maxConsecutive: 1,
+          availability: { p1: "AVAILABLE" },
+        },
+      ],
+    };
+    const issues = validateSchedule(problem, [
+      {
+        sessionId: "lab:1",
+        curriculumId: "lab",
+        classId: "c1",
+        subjectId: "lab",
+        teacherId: "t1",
+        dayId: "sun",
+        startPosition: 3,
+        periodIds: ["p1"],
+        weekPattern: "WEEK_A",
+      },
+      {
+        sessionId: "writing:1",
+        curriculumId: "writing",
+        classId: "c1",
+        subjectId: "writing",
+        teacherId: "t2",
+        dayId: "sun",
+        startPosition: 3,
+        periodIds: ["p1"],
+        weekPattern: "WEEK_B",
+      },
+    ]);
+    expect(issues).toContainEqual(
+      expect.objectContaining({
+        code: "ALTERNATING_LESSONS_REQUIRE_RECIPROCAL_SWAP",
+        severity: "ERROR",
+      }),
+    );
+  });
+
+  it("تعویض متقابل دو درس و دو دبیر میان دو کلاس را می‌پذیرد", () => {
+    const problem: SchedulingProblem = {
+      schoolId: "school",
+      academicYearId: "year",
+      academicYearTitle: "۱۴۰۵–۱۴۰۶",
+      classes: ["c1", "c2"].map((id, index) => ({
+        id,
+        name: `دهم ${index + 1}`,
+        gradeId: "10",
+        gradeName: "دهم",
+        majorId: id,
+        majorName: id,
+      })),
+      periods: [{
+        id: "p1",
+        dayId: "sat",
+        dayLabel: "شنبه",
+        dayOrder: 0,
+        position: 1,
+        label: "زنگ ۱",
+        startTime: "08:00",
+        endTime: "09:15",
+        instructionalUnits: 2,
+        isLast: false,
+      }],
+      curriculum: [
+        ["c1-defense", "c1", "defense", "دفاعی", "t1"],
+        ["c1-english", "c1", "english", "زبان", "t2"],
+        ["c2-english", "c2", "english", "زبان", "t2"],
+        ["c2-defense", "c2", "defense", "دفاعی", "t1"],
+      ].map(([id, classId, subjectId, subjectName, teacherId]) => ({
+        id,
+        classId,
+        className: classId,
+        subjectId,
+        subjectName,
+        weeklyHours: 1,
+        sessionPattern: [1],
+        teacherAllocations: [{ teacherId, assignedWeeklyHours: 1 }],
+      })),
+      teachers: [
+        { id: "t1", name: "دبیر دفاعی", subjectId: "defense" },
+        { id: "t2", name: "دبیر زبان", subjectId: "english" },
+      ].map(({ id, name, subjectId }) => ({
+        id,
+        name,
+        profileConfigured: true,
+        subjectAssignments: [{ subjectId, assignedWeeklyHours: 2 }],
+        minimumWorkload: 0,
+        requiredWorkload: 2,
+        maximumWorkload: 2,
+        overtimeAllowance: 0,
+        dailyMaximum: 1,
+        maxConsecutive: 1,
+        availability: { p1: "AVAILABLE" as const },
+      })),
+    };
+    const assignment = (
+      curriculumId: string,
+      classId: string,
+      subjectId: string,
+      teacherId: string,
+      weekPattern: "WEEK_A" | "WEEK_B",
+    ) => ({
+      sessionId: `${curriculumId}:1`,
+      curriculumId,
+      classId,
+      subjectId,
+      teacherId,
+      dayId: "sat",
+      startPosition: 1,
+      periodIds: ["p1"],
+      weekPattern,
+    });
+    const issues = validateSchedule(problem, [
+      assignment("c1-defense", "c1", "defense", "t1", "WEEK_A"),
+      assignment("c1-english", "c1", "english", "t2", "WEEK_B"),
+      assignment("c2-english", "c2", "english", "t2", "WEEK_A"),
+      assignment("c2-defense", "c2", "defense", "t1", "WEEK_B"),
+    ]);
+    expect(issues.filter((issue) => issue.severity === "ERROR")).toEqual([]);
   });
 });

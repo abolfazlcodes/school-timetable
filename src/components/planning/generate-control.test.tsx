@@ -25,7 +25,9 @@ describe("کنترل تولید برنامه", () => {
     fireEvent.click(screen.getByRole("button", { name: "تولید برنامه" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("پاسخی از سرور دریافت نشد");
     expect(screen.getByRole("button", { name: "بارگذاری نسخه جدید" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "تولید برنامه" })).toBeDisabled();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "تولید برنامه" })).toBeDisabled(),
+    );
   });
 
   it("درخواست بدون پاسخ را برای همیشه در حالت انتظار نگه نمی‌دارد", async () => {
@@ -33,6 +35,8 @@ describe("کنترل تولید برنامه", () => {
     fireEvent.click(screen.getByRole("button", { name: "تولید برنامه" }));
     expect(screen.getByRole("button", { name: "در حال ساخت برنامه معتبر…" })).toBeDisabled();
     expect(await screen.findByRole("alert")).toHaveTextContent("پاسخی از سرور دریافت نشد");
-    expect(screen.getByRole("button", { name: "تولید برنامه" })).toBeDisabled();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "تولید برنامه" })).toBeDisabled(),
+    );
   });
 });

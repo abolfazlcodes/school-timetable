@@ -10,9 +10,12 @@ import {
 import { validateSchedule } from "./validator";
 import {
   activeCycleWeeks,
+  alternatingSessionPairs,
   assignedHoursFor,
   compatibleWeekPatterns,
   expandSessions,
+  isDirectAlternatingPair,
+  isReciprocalAlternatingSwap,
   normalizedWeekPattern,
   type PenaltyBreakdown,
   type ScheduleAssignment,
@@ -23,8 +26,17 @@ import {
   type SchedulingProblem,
 } from "./types";
 
-const ENGINE_VERSION = "cp-sat-2.3";
+const ENGINE_VERSION = "cp-sat-2.5";
 export { ENGINE_VERSION };
+
+const configuredWorkers = Number.parseInt(
+  process.env.SCHEDULER_CP_WORKERS ?? "1",
+  10,
+);
+const CP_SAT_WORKERS =
+  Number.isInteger(configuredWorkers) && configuredWorkers > 0
+    ? configuredWorkers
+    : 1;
 
 // OR-Tools SatParameters.SearchBranching.HINT_SEARCH. The package exposes the
 // typed parameter but not the generated enum from its public entry point.
@@ -58,6 +70,36 @@ interface CoarseTeacherChoice {
 
 interface CoarseDayChoice extends CoarseTeacherChoice {
   dayId: string;
+}
+
+interface CoarseAlternatingMatch {
+  variable: BoolVar;
+  weekA: CoarsePlacement;
+  weekB: CoarsePlacement;
+}
+
+interface ExactAlternatingMatch {
+  variable: BoolVar;
+  weekA: Placement;
+  weekB: Placement;
+}
+
+function coarseAlternatingIdentity(placement: CoarsePlacement) {
+  return {
+    classId: placement.session.classId,
+    curriculumId: placement.session.curriculumId,
+    subjectId: placement.session.subjectId,
+    teacherId: placement.teacherId,
+  };
+}
+
+function exactAlternatingIdentity(placement: Placement) {
+  return {
+    classId: placement.assignment.classId,
+    curriculumId: placement.assignment.curriculumId,
+    subjectId: placement.assignment.subjectId,
+    teacherId: placement.assignment.teacherId,
+  };
 }
 
 interface TeacherDayHint {
@@ -462,7 +504,7 @@ async function solveTeacherHints(
   );
   const solver = new CpSolver();
   solver.parameters.maxTimeInSeconds = Math.max(1, timeBudgetMs) / 1_000;
-  solver.parameters.numSearchWorkers = 1;
+  solver.parameters.numSearchWorkers = CP_SAT_WORKERS;
   solver.parameters.randomSeed = 1;
   const status = await solver.solve(model);
   if (status !== CpSolverStatus.OPTIMAL && status !== CpSolverStatus.FEASIBLE) {
@@ -658,7 +700,7 @@ async function solveTeacherDayHints(
   );
   const solver = new CpSolver();
   solver.parameters.maxTimeInSeconds = Math.max(1, timeBudgetMs) / 1_000;
-  solver.parameters.numSearchWorkers = 1;
+  solver.parameters.numSearchWorkers = CP_SAT_WORKERS;
   solver.parameters.randomSeed = 1;
   const status = await solver.solve(model);
   if (status !== CpSolverStatus.OPTIMAL && status !== CpSolverStatus.FEASIBLE) {
@@ -784,6 +826,142 @@ async function solveDecomposition(
       };
     }
     model.addExactlyOne(domain.map((choice) => choice.variable));
+  }
+
+  for (const [first, second] of alternatingSessionPairs(sessions)) {
+    const days = new Set(
+      choices
+        .filter(
+          (choice) =>
+            choice.session.id === first.id || choice.session.id === second.id,
+        )
+        .map((choice) => choice.dayId),
+    );
+    for (const dayId of days) {
+      for (const [firstWeek, secondWeek] of [
+        ["WEEK_A", "WEEK_B"],
+        ["WEEK_B", "WEEK_A"],
+      ] as const) {
+        model.addEquality(
+          LinearExpr.sum(
+            choices
+              .filter(
+                (choice) =>
+                  choice.session.id === first.id &&
+                  choice.dayId === dayId &&
+                  choice.weekPattern === firstWeek,
+              )
+              .map((choice) => choice.variable),
+          ),
+          LinearExpr.sum(
+            choices
+              .filter(
+                (choice) =>
+                  choice.session.id === second.id &&
+                  choice.dayId === dayId &&
+                  choice.weekPattern === secondWeek,
+              )
+              .map((choice) => choice.variable),
+          ),
+        );
+      }
+    }
+  }
+
+  // If two alternate-week lessons share a two-unit period, they must form a
+  // direct pair (same curriculum or same teacher), or two classes must perform
+  // a reciprocal teacher/subject swap. Encoding this in the coarse model
+  // prevents teacher/day locks that the exact model could never extend to
+  // real periods while preserving intentional empty capacity.
+  const alternatingByClassDay = new Map<
+    string,
+    { weekA: CoarsePlacement[]; weekB: CoarsePlacement[] }
+  >();
+  for (const choice of choices) {
+    if (
+      choice.instructionalUnits !== 2 ||
+      (choice.weekPattern !== "WEEK_A" &&
+        choice.weekPattern !== "WEEK_B")
+    ) {
+      continue;
+    }
+    const key = `${choice.session.classId}\u0000${choice.dayId}`;
+    const group = alternatingByClassDay.get(key) ?? {
+      weekA: [],
+      weekB: [],
+    };
+    group[choice.weekPattern === "WEEK_A" ? "weekA" : "weekB"].push(
+      choice,
+    );
+    alternatingByClassDay.set(key, group);
+  }
+  let matchingIndex = 0;
+  const alternatingMatches: CoarseAlternatingMatch[] = [];
+  const hasPotentialCoarseReciprocal = (
+    first: CoarsePlacement,
+    second: CoarsePlacement,
+  ) => {
+    const firstIdentity = coarseAlternatingIdentity(first);
+    const secondIdentity = coarseAlternatingIdentity(second);
+    if (isDirectAlternatingPair(firstIdentity, secondIdentity)) return true;
+    return [...alternatingByClassDay.entries()].some(([key, candidate]) => {
+      const [classId, dayId] = key.split("\u0000");
+      if (
+        classId === first.session.classId ||
+        dayId !== first.dayId
+      ) {
+        return false;
+      }
+      return candidate.weekA.some((candidateWeekA) =>
+        candidate.weekB.some((candidateWeekB) =>
+          isReciprocalAlternatingSwap(
+            firstIdentity,
+            secondIdentity,
+            coarseAlternatingIdentity(candidateWeekA),
+            coarseAlternatingIdentity(candidateWeekB),
+          ),
+        ),
+      );
+    });
+  };
+  for (const { weekA, weekB } of alternatingByClassDay.values()) {
+    for (const first of weekA) {
+      for (const second of weekB) {
+        if (!hasPotentialCoarseReciprocal(first, second)) {
+          model.addAtMostOne([first.variable, second.variable]);
+          continue;
+        }
+        const match = model.newBoolVar(`coarse-match-${matchingIndex++}`);
+        model.addLessOrEqual(match, first.variable);
+        model.addLessOrEqual(match, second.variable);
+        model.addGreaterOrEqual(
+          match,
+          LinearExpr.sum([first.variable, second.variable]).sub(1),
+        );
+        alternatingMatches.push({ variable: match, weekA: first, weekB: second });
+      }
+    }
+  }
+  for (const match of alternatingMatches) {
+    const weekA = coarseAlternatingIdentity(match.weekA);
+    const weekB = coarseAlternatingIdentity(match.weekB);
+    if (isDirectAlternatingPair(weekA, weekB)) continue;
+    const reciprocal = alternatingMatches
+      .filter((candidate) =>
+        candidate.weekA.dayId === match.weekA.dayId &&
+        isReciprocalAlternatingSwap(
+          weekA,
+          weekB,
+          coarseAlternatingIdentity(candidate.weekA),
+          coarseAlternatingIdentity(candidate.weekB),
+        ),
+      )
+      .map((candidate) => candidate.variable);
+    if (reciprocal.length) {
+      model.addLessOrEqual(match.variable, LinearExpr.sum(reciprocal));
+    } else {
+      model.addEquality(match.variable, 0);
+    }
   }
 
   // Explicit hierarchy variables let CP-SAT settle the high-impact teacher
@@ -936,7 +1114,7 @@ async function solveDecomposition(
   // The decomposition already receives a complete teacher/day warm start in
   // normal large-school runs, so hint search reaches a stable coarse plan much
   // faster than the generic portfolio on that hardware.
-  solver.parameters.numSearchWorkers = 1;
+  solver.parameters.numSearchWorkers = CP_SAT_WORKERS;
   if (hints?.size) solver.parameters.searchBranching = HINT_SEARCH;
   solver.parameters.randomSeed = 1;
   const status = await solver.solve(model);
@@ -978,7 +1156,40 @@ function addHardConstraints(
     else model.addAtMostOne(variables);
   }
 
+  for (const [first, second] of alternatingSessionPairs(sessions)) {
+    for (const period of problem.periods.filter(
+      (item) => item.instructionalUnits === 2,
+    )) {
+      for (const [firstWeek, secondWeek] of [
+        ["WEEK_A", "WEEK_B"],
+        ["WEEK_B", "WEEK_A"],
+      ] as const) {
+        model.addEquality(
+          LinearExpr.sum(
+            (bySession.get(first.id) ?? [])
+              .filter(
+                (placement) =>
+                  placement.assignment.periodIds[0] === period.id &&
+                  placement.assignment.weekPattern === firstWeek,
+              )
+              .map((placement) => placement.variable),
+          ),
+          LinearExpr.sum(
+            (bySession.get(second.id) ?? [])
+              .filter(
+                (placement) =>
+                  placement.assignment.periodIds[0] === period.id &&
+                  placement.assignment.weekPattern === secondWeek,
+              )
+              .map((placement) => placement.variable),
+          ),
+        );
+      }
+    }
+  }
+
   const classSlots = new Map<string, BoolVar[]>();
+  const alternatingClassSlots = new Map<string, Placement[]>();
   const teacherSlots = new Map<string, BoolVar[]>();
   const teacherDays = new Map<string, Placement[]>();
   const teacherSubjects = new Map<string, Placement[]>();
@@ -991,6 +1202,16 @@ function addHardConstraints(
         const teacherKey = `${assignment.teacherId}:${periodId}:${week}`;
         classSlots.set(classKey, [...(classSlots.get(classKey) ?? []), placement.variable]);
         teacherSlots.set(teacherKey, [...(teacherSlots.get(teacherKey) ?? []), placement.variable]);
+        if (
+          assignment.weekPattern === "WEEK_A" ||
+          assignment.weekPattern === "WEEK_B"
+        ) {
+          pushGrouped(
+            alternatingClassSlots,
+            `${assignment.classId}\u0000${periodId}\u0000${assignment.weekPattern}`,
+            placement,
+          );
+        }
       }
       const dayKey = `${assignment.teacherId}:${assignment.dayId}:${week}`;
       teacherDays.set(dayKey, [...(teacherDays.get(dayKey) ?? []), placement]);
@@ -1009,6 +1230,89 @@ function addHardConstraints(
   for (const [key, variables] of classSlots) {
     if (requireAll && fullClasses.has(key.split(":")[0])) model.addExactlyOne(variables);
     else if (variables.length > 1) model.addAtMostOne(variables);
+  }
+
+  // Whenever two alternate-week placements share the same class and physical
+  // period, their pair must be direct or have an exact reciprocal swap in a
+  // second class. A class with intentionally unused capacity may still leave
+  // the opposite week empty; full-load classes are filled by `classSlots`.
+  const alternatingMatches: ExactAlternatingMatch[] = [];
+  let alternatingMatchIndex = 0;
+  const hasPotentialExactReciprocal = (
+    first: Placement,
+    second: Placement,
+  ) => {
+    const firstIdentity = exactAlternatingIdentity(first);
+    const secondIdentity = exactAlternatingIdentity(second);
+    if (isDirectAlternatingPair(firstIdentity, secondIdentity)) return true;
+    const periodId = first.assignment.periodIds[0];
+    return [...alternatingClassSlots.entries()].some(([key, candidateWeekA]) => {
+      if (!key.endsWith("\u0000WEEK_A")) return false;
+      const [classId, candidatePeriodId] = key.split("\u0000");
+      if (
+        classId === first.assignment.classId ||
+        candidatePeriodId !== periodId
+      ) {
+        return false;
+      }
+      const candidateWeekB =
+        alternatingClassSlots.get(key.replace(/WEEK_A$/, "WEEK_B")) ?? [];
+      return candidateWeekA.some((weekA) =>
+        candidateWeekB.some((weekB) =>
+          isReciprocalAlternatingSwap(
+            firstIdentity,
+            secondIdentity,
+            exactAlternatingIdentity(weekA),
+            exactAlternatingIdentity(weekB),
+          ),
+        ),
+      );
+    });
+  };
+  for (const [key, weekAPlacements] of alternatingClassSlots) {
+    if (!key.endsWith("\u0000WEEK_A")) continue;
+    const weekBPlacements =
+      alternatingClassSlots.get(key.replace(/WEEK_A$/, "WEEK_B")) ?? [];
+    for (const weekA of weekAPlacements) {
+      for (const weekB of weekBPlacements) {
+        if (!hasPotentialExactReciprocal(weekA, weekB)) {
+          model.addAtMostOne([weekA.variable, weekB.variable]);
+          continue;
+        }
+        const match = model.newBoolVar(
+          `alternate-slot-match-${alternatingMatchIndex++}`,
+        );
+        model.addLessOrEqual(match, weekA.variable);
+        model.addLessOrEqual(match, weekB.variable);
+        model.addGreaterOrEqual(
+          match,
+          LinearExpr.sum([weekA.variable, weekB.variable]).sub(1),
+        );
+        alternatingMatches.push({ variable: match, weekA, weekB });
+      }
+    }
+  }
+  for (const match of alternatingMatches) {
+    const weekA = exactAlternatingIdentity(match.weekA);
+    const weekB = exactAlternatingIdentity(match.weekB);
+    if (isDirectAlternatingPair(weekA, weekB)) continue;
+    const periodId = match.weekA.assignment.periodIds[0];
+    const reciprocal = alternatingMatches
+      .filter((candidate) =>
+        candidate.weekA.assignment.periodIds[0] === periodId &&
+        isReciprocalAlternatingSwap(
+          weekA,
+          weekB,
+          exactAlternatingIdentity(candidate.weekA),
+          exactAlternatingIdentity(candidate.weekB),
+        ),
+      )
+      .map((candidate) => candidate.variable);
+    if (reciprocal.length) {
+      model.addLessOrEqual(match.variable, LinearExpr.sum(reciprocal));
+    } else {
+      model.addEquality(match.variable, 0);
+    }
   }
 
   const exactSubjects = exactSubjectIds(problem, sessions);
@@ -1191,7 +1495,7 @@ async function solveExact(
     }
     const solver = new CpSolver();
     solver.parameters.maxTimeInSeconds = remainingMs / 1_000;
-    solver.parameters.numSearchWorkers = 1;
+    solver.parameters.numSearchWorkers = CP_SAT_WORKERS;
     solver.parameters.randomSeed = 1;
     status = await solver.solve(model);
     exploredNodes += solver.numBranches;
@@ -1262,7 +1566,7 @@ async function diagnoseMaximumFeasible(
   // Keep the diagnostic path inside the same single-vCPU budget as the main
   // solve. Oversubscribing here makes an already unsuccessful run more likely
   // to end as a serverless timeout before its actionable diagnosis is saved.
-  solver.parameters.numSearchWorkers = 1;
+  solver.parameters.numSearchWorkers = CP_SAT_WORKERS;
   solver.parameters.randomSeed = 1;
   const status = await solver.solve(model);
   if (status !== CpSolverStatus.OPTIMAL && status !== CpSolverStatus.FEASIBLE) {

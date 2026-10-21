@@ -2,6 +2,7 @@ import PDFDocument from "pdfkit";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { expandSessions, normalizedWeekPattern, weekPatternLabel } from "@/modules/scheduling/types";
+import { groupTimetableAssignmentsForDisplay } from "@/modules/timetable/presentation";
 import type { TimetableViewData } from "@/modules/timetable/service";
 
 export type ExportView = "class" | "teacher" | "school";
@@ -172,30 +173,31 @@ export function buildSchoolTimetablePages(data: TimetableViewData): SchoolTimeta
             cells[key] = {
               unavailable: false,
               severity,
-              lessons: [...assignments]
-                .sort((a, b) =>
+              lessons: groupTimetableAssignmentsForDisplay(
+                [...assignments].sort((a, b) =>
                   normalizedWeekPattern(a).localeCompare(
                     normalizedWeekPattern(b),
                   ),
-                )
-                .map((assignment) => {
-                  const session = sessions.get(assignment.sessionId);
-                  const pattern = normalizedWeekPattern(assignment);
-                  return {
-                    sessionId: assignment.sessionId,
-                    subject: session?.subjectName ?? "درس",
-                    teacher:
-                      teachers.get(assignment.teacherId) ?? "دبیر تعیین نشده",
-                    weekLabel:
-                      pattern === "EVERY_WEEK"
-                        ? null
-                        : weekPatternLabel(pattern),
-                    continuation: assignment.startPosition !== position,
-                    time: variableTime
-                      ? `${period.startTime.slice(0, 5)}–${period.endTime.slice(0, 5)}`
-                      : null,
-                  };
-                }),
+                ),
+              ).map((group) => {
+                const assignment = group.assignment;
+                const session = sessions.get(assignment.sessionId);
+                const pattern = group.displayWeekPattern;
+                return {
+                  sessionId: assignment.sessionId,
+                  subject: session?.subjectName ?? "درس",
+                  teacher:
+                    teachers.get(assignment.teacherId) ?? "دبیر تعیین نشده",
+                  weekLabel:
+                    pattern === "EVERY_WEEK"
+                      ? null
+                      : weekPatternLabel(pattern),
+                  continuation: assignment.startPosition !== position,
+                  time: variableTime
+                    ? `${period.startTime.slice(0, 5)}–${period.endTime.slice(0, 5)}`
+                    : null,
+                };
+              }),
             };
           }
         }
@@ -257,7 +259,8 @@ export function buildTimetableExport(
         a.classId.localeCompare(b.classId)
       );
     });
-  const rows = assignments.map((assignment) => {
+  const rows = groupTimetableAssignmentsForDisplay(assignments).map((group) => {
+    const assignment = group.assignment;
     const session = sessions.get(assignment.sessionId);
     const first = periods.get(assignment.periodIds[0]);
     const last = periods.get(assignment.periodIds.at(-1) ?? "");
@@ -268,9 +271,9 @@ export function buildTimetableExport(
           ? (first?.label ?? "—")
           : `${first?.label ?? "—"} تا ${last?.label ?? "—"}`
       }${
-        normalizedWeekPattern(assignment) === "EVERY_WEEK"
+        group.displayWeekPattern === "EVERY_WEEK"
           ? ""
-          : ` · ${weekPatternLabel(normalizedWeekPattern(assignment))}`
+          : ` · ${weekPatternLabel(group.displayWeekPattern)}`
       }`,
       time:
         first && last

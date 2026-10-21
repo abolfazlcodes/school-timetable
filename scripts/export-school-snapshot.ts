@@ -148,7 +148,8 @@ try {
     sql`
       SELECT cg.name AS "className", g.name AS "gradeName", m.name AS "majorName",
              s.name AS "subjectName", t.first_name AS "teacherFirstName",
-             t.last_name AS "teacherLastName", t.personnel_code AS "personnelCode"
+             t.last_name AS "teacherLastName", t.personnel_code AS "personnelCode",
+             csta.assigned_weekly_hours AS "assignedWeeklyHours"
       FROM class_subject_teacher_assignments csta
       JOIN class_groups cg ON cg.id = csta.class_id
       JOIN grades g ON g.id = cg.grade_id

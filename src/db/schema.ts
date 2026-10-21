@@ -503,11 +503,17 @@ export const classSubjectTeacherAssignments = pgTable(
     teacherId: uuid("teacher_id")
       .notNull()
       .references(() => teachers.id, { onDelete: "restrict" }),
+    assignedWeeklyHours: integer("assigned_weekly_hours").notNull(),
   },
   (table) => [
     primaryKey({
       name: "class_subject_teacher_assignments_pk",
-      columns: [table.academicYearId, table.classId, table.subjectId],
+      columns: [
+        table.academicYearId,
+        table.classId,
+        table.subjectId,
+        table.teacherId,
+      ],
     }),
     index("class_subject_teacher_assignments_school_year_idx").on(
       table.schoolId,

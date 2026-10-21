@@ -154,6 +154,8 @@ export function createSchedulingRepository<
             classId: classSubjectTeacherAssignments.classId,
             subjectId: classSubjectTeacherAssignments.subjectId,
             teacherId: classSubjectTeacherAssignments.teacherId,
+            assignedWeeklyHours:
+              classSubjectTeacherAssignments.assignedWeeklyHours,
           })
           .from(classSubjectTeacherAssignments)
           .where(
@@ -161,6 +163,11 @@ export function createSchedulingRepository<
               eq(classSubjectTeacherAssignments.schoolId, context.schoolId),
               eq(classSubjectTeacherAssignments.academicYearId, year.id),
             ),
+          )
+          .orderBy(
+            asc(classSubjectTeacherAssignments.classId),
+            asc(classSubjectTeacherAssignments.subjectId),
+            asc(classSubjectTeacherAssignments.teacherId),
           ),
         db
           .select({
@@ -267,12 +274,17 @@ export function createSchedulingRepository<
             subjectName: rule.subjectName,
             weeklyHours: rule.weeklyHours,
             sessionPattern: rule.sessionPattern,
-            assignedTeacherId:
-              classTeacherRows.find(
+            teacherAllocations: classTeacherRows
+              .filter(
                 (item) =>
                   item.classId === schoolClass.id &&
                   item.subjectId === rule.subjectId,
-              )?.teacherId ?? null,
+              )
+              .map((item) => ({
+                teacherId: item.teacherId,
+                assignedWeeklyHours: item.assignedWeeklyHours,
+              })),
+            assignedTeacherId: null,
           })),
       );
       const periodsView = periodRows.map((period) => {

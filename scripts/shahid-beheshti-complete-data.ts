@@ -287,20 +287,20 @@ export const shahidBeheshtiLessonRows: CompleteLessonRow[] = [
 
 const splitTeacherAllocations = [
   {
-    classKey: "10-science",
-    subject: "آمادگی دفاعی",
-    allocations: [
-      { teacherKey: "hamid-vesali", hours: 2 },
-      { teacherKey: "mohammadreza-salimi", hours: 1 },
-    ],
-    sessionPattern: [2, 1],
-  },
-  {
     classKey: "10-math",
     subject: "آزمایشگاه",
     allocations: [
       { teacherKey: "alireza-salimi", hours: 1 },
       { teacherKey: "mohammadreza-salimi", hours: 1 },
+    ],
+    sessionPattern: [1, 1],
+  },
+  {
+    classKey: "10-humanities",
+    subject: "نگارش",
+    allocations: [
+      { teacherKey: "ali-asadi", hours: 1 },
+      { teacherKey: "abbas-nazari", hours: 1 },
     ],
     sessionPattern: [1, 1],
   },
@@ -314,20 +314,74 @@ const splitTeacherAllocations = [
     sessionPattern: [1, 1],
   },
   {
-    classKey: "12-math",
+    classKey: "12-humanities-b",
     subject: "نگارش",
     allocations: [
-      { teacherKey: "hamid-bagheri", hours: 1 },
+      { teacherKey: "majid-khani", hours: 1 },
       { teacherKey: "amir-chogini", hours: 1 },
     ],
     sessionPattern: [1, 1],
   },
   {
-    classKey: "12-math",
-    subject: "علوم اجتماعی",
+    classKey: "10-math",
+    subject: "نگارش",
     allocations: [
+      { teacherKey: "hamid-bagheri", hours: 1 },
+      { teacherKey: "ali-asadi", hours: 1 },
+    ],
+    sessionPattern: [1, 1],
+  },
+  {
+    classKey: "12-math",
+    subject: "نگارش",
+    allocations: [
+      { teacherKey: "majid-khani", hours: 1 },
+      { teacherKey: "amir-chogini", hours: 1 },
+    ],
+    sessionPattern: [1, 1],
+  },
+  {
+    classKey: "11-humanities",
+    subject: "کارآفرینی",
+    allocations: [
+      { teacherKey: "mohammadreza-salimi", hours: 1 },
       { teacherKey: "ali-raziei", hours: 1 },
-      { teacherKey: "esmail-hamzeh", hours: 1 },
+    ],
+    sessionPattern: [1, 1],
+  },
+  {
+    classKey: "11-math",
+    subject: "کارآفرینی",
+    allocations: [
+      { teacherKey: "rasoul-janjaneh", hours: 1 },
+      { teacherKey: "ali-raziei", hours: 1 },
+    ],
+    sessionPattern: [1, 1],
+  },
+  {
+    classKey: "12-math",
+    subject: "مدیریت خانواده",
+    allocations: [
+      { teacherKey: "abbas-nazari", hours: 1 },
+      { teacherKey: "hamid-vesali", hours: 1 },
+    ],
+    sessionPattern: [1, 1],
+  },
+  {
+    classKey: "12-science",
+    subject: "تربیت بدنی",
+    allocations: [
+      { teacherKey: "seyed-mohammad-hosseini", hours: 1 },
+      { teacherKey: "abolfazl-khalili", hours: 1 },
+    ],
+    sessionPattern: [1, 1],
+  },
+  {
+    classKey: "12-humanities-b",
+    subject: "تربیت بدنی",
+    allocations: [
+      { teacherKey: "abolfazl-khalili", hours: 1 },
+      { teacherKey: "majid-khani", hours: 1 },
     ],
     sessionPattern: [1, 1],
   },
@@ -340,6 +394,26 @@ for (const split of splitTeacherAllocations) {
   if (!row) throw new Error(`نیاز درسی ${split.classKey}/${split.subject} پیدا نشد.`);
   row.teacherAllocations = split.allocations;
   if (split.sessionPattern) row.sessionPattern = split.sessionPattern;
+}
+
+// این تغییرها از آخرین تخصیص سالانهٔ ثبت‌شده توسط معاون گرفته شده‌اند.
+// خروجی دستی برنامه منبع ساعت یا جای‌گذاری نیست؛ این فهرست فقط مشخص می‌کند
+// هر نیاز کلاس/درس متعلق به کدام دبیر است.
+const correctedSingleTeacherRows = [
+  ["11-humanities", "نگارش", "esmail-hamzeh"],
+  ["12-humanities-a", "نگارش", "amir-chogini"],
+  ["10-science", "نگارش", "abolfazl-khalili"],
+  ["11-science", "نگارش", "mohammadreza-hemmati"],
+  ["11-math", "نگارش", "mohammadreza-hemmati"],
+  ["11-science", "کارآفرینی", "rasoul-janjaneh"],
+] as const;
+
+for (const [classKey, subject, teacherKey] of correctedSingleTeacherRows) {
+  const row = shahidBeheshtiLessonRows.find(
+    (item) => item.classKey === classKey && item.subject === subject,
+  );
+  if (!row) throw new Error(`نیاز درسی ${classKey}/${subject} پیدا نشد.`);
+  row.teacherKey = teacherKey;
 }
 
 // معاون در نسخهٔ عملیاتی آزمایشگاه دهم تجربی را یک جلسهٔ پیوسته ثبت کرده است.
@@ -508,7 +582,6 @@ const shahidBeheshtiSplittableTwoHourSubjects = new Set([
   // در snapshot فعلی عنوان معادل این درس «علوم اجتماعی» ثبت شده است.
   "علوم اجتماعی",
   "مطالعات فرهنگی",
-  "تربیت بدنی",
 ]);
 
 /**
@@ -525,6 +598,7 @@ export function shahidBeheshtiSessionPattern(
     const canSplit =
       shahidBeheshtiSplittableTwoHourSubjects.has(row.subject) ||
       (row.subject === "عربی" && row.grade === "12" && row.major === "SCIENCE") ||
+      (row.subject === "تربیت بدنی" && row.grade === "12" && row.major === "SCIENCE") ||
       (row.subject === "آزمایشگاه" && row.grade === "10") ||
       (row.subject === "نگارش" && (row.grade === "10" || row.grade === "12"));
     return canSplit ? [1, 1] : [2];

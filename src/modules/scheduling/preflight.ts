@@ -1,5 +1,13 @@
 import { validateSessionPattern } from "@/modules/planning/domain";
-import { assignedHoursFor, compatibleWeekPatterns, expandSessions } from "./types";
+import {
+  allocatedTeachersForSessions,
+  alternatingSessionPairs,
+  assignedHoursFor,
+  compatibleWeekPatterns,
+  expandSessions,
+  isDirectAlternatingPair,
+  isReciprocalAlternatingSwap,
+} from "./types";
 import type { SchedulingIssue, SchedulingProblem } from "./types";
 
 export interface PreflightResult { canGenerate: boolean; issues: SchedulingIssue[]; summary: { classCount: number; teacherCount: number; weeklyHours: number; sessionCount: number; errorCount: number; warningCount: number } }
@@ -162,10 +170,165 @@ export function runPreflight(problem: SchedulingProblem): PreflightResult {
   for (const item of problem.curriculum) {
     const patternError = validateSessionPattern(item.weeklyHours, item.sessionPattern.length, item.sessionPattern);
     if (patternError) issues.push({ code: "INVALID_SESSION_PATTERN", severity: "ERROR", message: `الگوی جلسات «${item.subjectName}» برای کلاس «${item.className}» معتبر نیست.`, entityType: "subject", entityId: item.subjectId, fixHref: "/planning?step=curriculum" });
-    const qualified = problem.teachers.filter((teacher) => assignedHoursFor(teacher, item.subjectId) > 0 && (!item.assignedTeacherId || teacher.id === item.assignedTeacherId));
-    if (!qualified.length) issues.push({ code: "MISSING_TEACHER", severity: "ERROR", message: `برای درس «${item.subjectName}» دبیر واجد شرایط تعیین نشده است.`, entityType: "subject", entityId: item.subjectId, fixHref: "/planning?step=teachers" });
-    else if (item.sessionPattern.some((workloadHours) => !qualified.some((teacher) => problem.periods.some((period) => ["AVAILABLE", "PREFERRED"].includes(teacher.availability[period.id]) && compatibleWeekPatterns(workloadHours, period.instructionalUnits).length)))) {
+    const allocatedTeachers = allocatedTeachersForSessions(item);
+    if (item.teacherAllocations?.length && !allocatedTeachers) {
+      issues.push({ code: "INVALID_CLASS_TEACHER_ALLOCATION", severity: "ERROR", message: `سهم دبیران درس «${item.subjectName}» برای کلاس «${item.className}» با ساعت و الگوی جلسه‌ها سازگار نیست.`, entityType: "subject", entityId: item.subjectId, fixHref: "/planning?step=teachers" });
+    }
+    if (
+      item.teacherAllocations &&
+      new Set(item.teacherAllocations.map((allocation) => allocation.teacherId))
+        .size !== item.teacherAllocations.length
+    ) {
+      issues.push({ code: "DUPLICATE_CLASS_TEACHER_ALLOCATION", severity: "ERROR", message: `برای درس «${item.subjectName}» کلاس «${item.className}» سهم یک دبیر بیش از یک‌بار ثبت شده است.`, entityType: "subject", entityId: item.subjectId, fixHref: "/planning?step=teachers" });
+    }
+    const itemSessions = expandSessions({ ...problem, curriculum: [item] });
+    const qualifiedBySession = itemSessions.map((session) =>
+      problem.teachers.filter(
+        (teacher) =>
+          assignedHoursFor(teacher, item.subjectId) > 0 &&
+          (!session.assignedTeacherId ||
+            teacher.id === session.assignedTeacherId),
+      ),
+    );
+    if (qualifiedBySession.some((qualified) => !qualified.length)) issues.push({ code: "MISSING_TEACHER", severity: "ERROR", message: `برای درس «${item.subjectName}» دبیر واجد شرایط تعیین نشده است.`, entityType: "subject", entityId: item.subjectId, fixHref: "/planning?step=teachers" });
+    else if (itemSessions.some((session, index) => !qualifiedBySession[index].some((teacher) => problem.periods.some((period) => ["AVAILABLE", "PREFERRED"].includes(teacher.availability[period.id]) && compatibleWeekPatterns(session.workloadHours, period.instructionalUnits).length)))) {
       issues.push({ code: "INCOMPATIBLE_SESSION_DURATION", severity: "ERROR", message: `برای یکی از جلسه‌های «${item.subjectName}» کلاس «${item.className}» زنگی با ظرفیت آموزشی سازگار و دبیر حاضر وجود ندارد.`, entityType: "subject", entityId: item.subjectId, fixHref: "/planning?step=structure" });
+    }
+  }
+  const expandedSessions = expandSessions(problem);
+  const pairedOneHourSessionIds = new Set(
+    alternatingSessionPairs(expandedSessions).flatMap(([first, second]) => [
+      first.id,
+      second.id,
+    ]),
+  );
+  const standaloneFixedOneHourSessions = expandedSessions.filter(
+    (session) =>
+      session.workloadHours === 1 &&
+      !pairedOneHourSessionIds.has(session.id) &&
+      Boolean(session.assignedTeacherId),
+  );
+  const teacherById = new Map(
+    problem.teachers.map((teacher) => [teacher.id, teacher]),
+  );
+  const shareAvailableTwoUnitPeriod = (...teacherIds: string[]) =>
+    problem.periods.some(
+      (period) =>
+        period.instructionalUnits === 2 &&
+        teacherIds.every((teacherId) =>
+          ["AVAILABLE", "PREFERRED"].includes(
+            teacherById.get(teacherId)?.availability[period.id] ??
+              "UNAVAILABLE",
+          ),
+        ),
+    );
+  const canUseAlternatingTwoUnitSlot = (sessionId: string) => {
+    const session = standaloneFixedOneHourSessions.find(
+      (item) => item.id === sessionId,
+    );
+    if (!session?.assignedTeacherId) return false;
+    const identity = {
+      classId: session.classId,
+      curriculumId: session.curriculumId,
+      subjectId: session.subjectId,
+      teacherId: session.assignedTeacherId,
+    };
+
+    for (const sameClassPartner of standaloneFixedOneHourSessions) {
+      if (
+        sameClassPartner.id === session.id ||
+        sameClassPartner.classId !== session.classId ||
+        !sameClassPartner.assignedTeacherId
+      ) {
+        continue;
+      }
+      const partnerIdentity = {
+        classId: sameClassPartner.classId,
+        curriculumId: sameClassPartner.curriculumId,
+        subjectId: sameClassPartner.subjectId,
+        teacherId: sameClassPartner.assignedTeacherId,
+      };
+      if (
+        isDirectAlternatingPair(identity, partnerIdentity) &&
+        shareAvailableTwoUnitPeriod(
+          session.assignedTeacherId,
+          sameClassPartner.assignedTeacherId,
+        )
+      ) {
+        return true;
+      }
+
+      for (const reciprocalWeekA of standaloneFixedOneHourSessions) {
+        if (
+          reciprocalWeekA.classId === session.classId ||
+          !reciprocalWeekA.assignedTeacherId
+        ) {
+          continue;
+        }
+        for (const reciprocalWeekB of standaloneFixedOneHourSessions) {
+          if (
+            reciprocalWeekB.classId !== reciprocalWeekA.classId ||
+            reciprocalWeekB.id === reciprocalWeekA.id ||
+            !reciprocalWeekB.assignedTeacherId
+          ) {
+            continue;
+          }
+          if (
+            isReciprocalAlternatingSwap(
+              identity,
+              partnerIdentity,
+              {
+                classId: reciprocalWeekA.classId,
+                curriculumId: reciprocalWeekA.curriculumId,
+                subjectId: reciprocalWeekA.subjectId,
+                teacherId: reciprocalWeekA.assignedTeacherId,
+              },
+              {
+                classId: reciprocalWeekB.classId,
+                curriculumId: reciprocalWeekB.curriculumId,
+                subjectId: reciprocalWeekB.subjectId,
+                teacherId: reciprocalWeekB.assignedTeacherId,
+              },
+            ) &&
+            shareAvailableTwoUnitPeriod(
+              session.assignedTeacherId,
+              sameClassPartner.assignedTeacherId,
+            )
+          ) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  };
+  for (const teacher of problem.teachers) {
+    // Only lessons that cannot participate in any direct or reciprocal
+    // alternate-week pairing are a proven demand for a real one-unit period.
+    // This intentionally remains a conservative lower bound: ambiguous
+    // overlapping pairings are left to CP-SAT instead of creating a false
+    // preflight blocker.
+    const requiredOneUnitPeriods = standaloneFixedOneHourSessions.filter(
+      (session) =>
+        session.assignedTeacherId === teacher.id &&
+        !canUseAlternatingTwoUnitSlot(session.id),
+    ).length;
+    const availableOneUnitPeriods = problem.periods.filter(
+      (period) =>
+        period.instructionalUnits === 1 &&
+        ["AVAILABLE", "PREFERRED"].includes(
+          teacher.availability[period.id],
+        ),
+    ).length;
+    if (requiredOneUnitPeriods > availableOneUnitPeriods) {
+      issues.push({
+        code: "INSUFFICIENT_ONE_UNIT_PERIODS_FOR_TEACHER",
+        severity: "ERROR",
+        message: `«${teacher.name}» دست‌کم برای ${requiredOneUnitPeriods.toLocaleString("fa-IR")} بخش یک‌ساعتهٔ بدون جفت فقط ${availableOneUnitPeriods.toLocaleString("fa-IR")} زنگ یک‌ساعتهٔ حاضر دارد؛ حضور یا تخصیص این بخش‌ها باید اصلاح شود.`,
+        entityType: "teacher",
+        entityId: teacher.id,
+        fixHref: `/planning?step=teachers&teacher=${teacher.id}`,
+      });
     }
   }
   const demandBySubject = new Map<string, { name: string; hours: number }>();
@@ -181,6 +344,52 @@ export function runPreflight(problem: SchedulingProblem): PreflightResult {
       )
       .map(([subjectId]) => subjectId),
   );
+  for (const [subjectId, demand] of demandBySubject) {
+    const subjectRequirements = problem.curriculum.filter(
+      (item) => item.subjectId === subjectId,
+    );
+    const isFullyAllocated = subjectRequirements.every(
+      (item) => item.teacherAllocations?.length,
+    );
+    if (!isFullyAllocated) continue;
+    const fixedHours = new Map<string, number>();
+    for (const item of subjectRequirements) {
+      if (item.teacherAllocations?.length) {
+        for (const allocation of item.teacherAllocations) {
+          fixedHours.set(
+            allocation.teacherId,
+            (fixedHours.get(allocation.teacherId) ?? 0) +
+              allocation.assignedWeeklyHours,
+          );
+        }
+      } else if (item.assignedTeacherId) {
+        fixedHours.set(
+          item.assignedTeacherId,
+          (fixedHours.get(item.assignedTeacherId) ?? 0) + item.weeklyHours,
+        );
+      }
+    }
+    const teacherIds = new Set([
+      ...fixedHours.keys(),
+      ...problem.teachers
+        .filter((teacher) => assignedHoursFor(teacher, subjectId) > 0)
+        .map((teacher) => teacher.id),
+    ]);
+    for (const teacherId of teacherIds) {
+      const teacher = problem.teachers.find((item) => item.id === teacherId);
+      const fixed = fixedHours.get(teacherId) ?? 0;
+      const annual = teacher ? assignedHoursFor(teacher, subjectId) : 0;
+      if (fixed === annual) continue;
+      issues.push({
+        code: "CLASS_TEACHER_ALLOCATION_MISMATCH",
+        severity: "ERROR",
+        message: `سهم قطعی «${teacher?.name ?? "دبیر ناشناخته"}» از درس «${demand.name}» در کلاس‌ها ${fixed.toLocaleString("fa-IR")} ساعت است، اما تخصیص سالانه ${annual.toLocaleString("fa-IR")} ساعت ثبت شده است.`,
+        entityType: "teacher",
+        entityId: teacherId,
+        fixHref: "/planning?step=teachers",
+      });
+    }
+  }
   for (const subjectId of exactSubjects) {
     if (hasExactSubjectSessionPartition(problem, subjectId) !== false) continue;
     const subjectName = demandBySubject.get(subjectId)?.name ?? "درس";

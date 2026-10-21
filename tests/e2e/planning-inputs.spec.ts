@@ -274,7 +274,7 @@ test("قطع درخواست تولید، همان صفحه را قابل باز�
   await expect(page.getByRole("button", { name: "تولید برنامه" })).toBeDisabled();
 });
 
-test("الگوی اختصاصی عربی دوازدهم تجربی قابل تنظیم است و برنامه معتبر می‌سازد", async ({
+test("الگوی اختصاصی عربی قابل تنظیم است و تعویض متقابل دهم‌ها برنامه معتبر می‌سازد", async ({
   page,
 }) => {
   test.setTimeout(90_000);
@@ -336,18 +336,22 @@ test("الگوی اختصاصی عربی دوازدهم تجربی قابل تن
   await page.setViewportSize({ width: 1440, height: 900 });
 
   await page.goto("/planning?step=review");
-  await expect(page.getByText("اطلاعات برای تولید برنامه آماده است")).toBeVisible();
+  await expect(
+    page.getByText("اطلاعات برای تولید برنامه آماده است"),
+  ).toBeVisible();
   await expect(page.locator(".preflight-metrics")).toContainText("۳۵۰");
   await expect(page.locator(".preflight-metrics")).toContainText("۲۱");
   await expect(page.locator(".preflight-metrics")).toContainText("۱۰");
+  await expect(page.getByText("خطای مسدودکننده‌ای پیدا نشد.")).toBeVisible();
   await page.getByRole("link", { name: "ادامه به تولید برنامه" }).click();
   await page.getByRole("button", { name: "تولید برنامه" }).click();
   await expect(page).toHaveURL(/planning\?step=generate&run=/, {
     timeout: 60_000,
   });
-  await page.waitForLoadState("networkidle");
-  await expect(page.getByText("برنامه معتبر تولید شد")).toBeVisible();
-  await expect(page.locator(".candidate-card").first()).toContainText("بدون تداخل");
+  await expect(page.getByText("برنامه معتبر تولید شد")).toBeVisible({
+    timeout: 60_000,
+  });
+  await expect(page.getByText("بدون تداخل").first()).toBeVisible();
   await page
     .getByLabel("انتخاب مدرسه فعال")
     .selectOption("20000000-0000-4000-8000-000000000002");

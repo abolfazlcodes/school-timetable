@@ -98,4 +98,63 @@ describe("خروجی فارسی برنامه", () => {
     } satisfies TimetableViewData;
     expect(buildTimetableExport(data, "class", "c1").rows[0].period).toContain("هفته اول");
   });
+
+  it("دو نیمه یکسان هفته اول و دوم را در جدول و خروجی فقط یک بار نشان می‌دهد", () => {
+    const problem = makeProblem();
+    const data = {
+      mode: "workspace",
+      workspaceId: "40000000-0000-4000-8000-000000000001",
+      revision: 0,
+      source: { candidateId: "50000000-0000-4000-8000-000000000001", runId: "60000000-0000-4000-8000-000000000001", rank: 1, score: 10_000 },
+      academicYearTitle: problem.academicYearTitle,
+      generatedAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+      problem,
+      assignments: [
+        { sessionId: "r1:1", curriculumId: "r1", classId: "c1", subjectId: "math", teacherId: "t1", dayId: "sat", startPosition: 1, periodIds: ["sa-1"], weekPattern: "WEEK_A" },
+        { sessionId: "r1:2", curriculumId: "r1", classId: "c1", subjectId: "math", teacherId: "t1", dayId: "sat", startPosition: 1, periodIds: ["sa-1"], weekPattern: "WEEK_B" },
+      ],
+      issues: [],
+      version: null,
+      versions: [],
+    } satisfies TimetableViewData;
+
+    const exported = buildTimetableExport(data, "class", "c1");
+    expect(exported.rows).toHaveLength(1);
+    expect(exported.rows[0].period).not.toContain("هفته");
+
+    const lessons = Object.values(buildSchoolTimetablePages(data)[0].cells)
+      .flatMap((cell) => cell.lessons);
+    expect(lessons).toHaveLength(1);
+    expect(lessons[0].weekLabel).toBeNull();
+  });
+
+  it("دو نیمه با دبیر متفاوت را در خروجی جدا نگه می‌دارد", () => {
+    const problem = makeProblem();
+    problem.teachers.push({ ...problem.teachers[0], id: "t2", name: "دبیر دوم" });
+    const data = {
+      mode: "workspace",
+      workspaceId: "40000000-0000-4000-8000-000000000001",
+      revision: 0,
+      source: { candidateId: "50000000-0000-4000-8000-000000000001", runId: "60000000-0000-4000-8000-000000000001", rank: 1, score: 10_000 },
+      academicYearTitle: problem.academicYearTitle,
+      generatedAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+      problem,
+      assignments: [
+        { sessionId: "r1:1", curriculumId: "r1", classId: "c1", subjectId: "math", teacherId: "t1", dayId: "sat", startPosition: 1, periodIds: ["sa-1"], weekPattern: "WEEK_A" },
+        { sessionId: "r1:2", curriculumId: "r1", classId: "c1", subjectId: "math", teacherId: "t2", dayId: "sat", startPosition: 1, periodIds: ["sa-1"], weekPattern: "WEEK_B" },
+      ],
+      issues: [],
+      version: null,
+      versions: [],
+    } satisfies TimetableViewData;
+
+    const exported = buildTimetableExport(data, "class", "c1");
+    expect(exported.rows).toHaveLength(2);
+    expect(exported.rows.map((row) => row.period)).toEqual([
+      expect.stringContaining("هفته اول"),
+      expect.stringContaining("هفته دوم"),
+    ]);
+  });
 });

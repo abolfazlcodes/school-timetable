@@ -30,6 +30,7 @@ import { Select } from "@/components/ui/field";
 import { cn, formatPersianDateTime } from "@/lib/utils";
 import { assignedHoursFor, compatibleWeekPatterns, expandSessions, normalizedWeekPattern, weekPatternLabel, type WeekPattern } from "@/modules/scheduling/types";
 import { createScheduleWorkspaceAction, editTimetableAction } from "@/modules/timetable/actions";
+import { groupTimetableAssignmentsForDisplay } from "@/modules/timetable/presentation";
 import { listUnscheduledSessions, type TimetableEditInput, type TimetableEditResult, type TimetableViewData } from "@/modules/timetable/service";
 import { archiveScheduleVersionAction, forkScheduleVersionAction, saveScheduleVersionAction } from "@/modules/schedule-versions/actions";
 
@@ -244,17 +245,33 @@ function TimetableGrid({
             if (coveringAssignments.length && coveringAssignments.every((item) => item.startPosition !== position)) continue;
             const slotAssignments = coveringAssignments.filter((item) => item.startPosition === position);
             if (slotAssignments.length) {
+              const displayGroups = groupTimetableAssignmentsForDisplay(
+                slotAssignments.sort((a, b) =>
+                  normalizedWeekPattern(a).localeCompare(normalizedWeekPattern(b)),
+                ),
+              );
               const cellIssues = slotAssignments.flatMap((assignment) => data.issues.filter((issue) => issue.entityType === "session" && issue.entityId === assignment.sessionId));
               const hasError = cellIssues.some((issue) => issue.severity === "ERROR");
               const hasWarning = cellIssues.some((issue) => issue.severity === "WARNING");
               const columnSpan = Math.max(...slotAssignments.map((assignment) => assignment.periodIds.length));
               cells.push(
                 <td colSpan={columnSpan} key={position} className={cn("has-lesson", hasError && "has-error", !hasError && hasWarning && "has-warning")}>
-                  <div className={cn("lesson-cell-group", slotAssignments.length > 1 && "is-alternating")}>
-                    {slotAssignments.sort((a, b) => normalizedWeekPattern(a).localeCompare(normalizedWeekPattern(b))).map((assignment) => {
+                  <div className={cn("lesson-cell-group", displayGroups.length > 1 && "is-alternating")}>
+                    {displayGroups.map((group) => {
+                      const assignment = group.assignment;
                       const session = sessions.get(assignment.sessionId);
                       const teacher = teachers.get(assignment.teacherId);
-                      const pattern = normalizedWeekPattern(assignment);
+                      const pattern = group.displayWeekPattern;
+                      if (group.combinedEveryWeek) {
+                        return <div className="lesson-cell lesson-cell--combined" key={group.key}>
+                          <strong>{session?.subjectName}</strong>
+                          <span>{mode === "classes" ? teacher?.name : session?.className}</span>
+                          <small><bdi>{period.startTime.slice(0, 5)}–{data.problem.periods.find((item) => item.id === assignment.periodIds.at(-1))?.endTime.slice(0, 5)}</bdi>{assignment.periodIds.length > 1 ? ` · ${assignment.periodIds.length.toLocaleString("fa-IR")} زنگ` : ""}{hasError ? " · خطا" : hasWarning ? " · هشدار" : ""}</small>
+                          {editable ? <div className="lesson-cell__week-actions" role="group" aria-label="ویرایش بخش‌های دوهفته‌ای جلسه">
+                            {group.assignments.map((sourceAssignment) => <button type="button" key={sourceAssignment.sessionId} aria-label={`ویرایش ${session?.subjectName ?? "جلسه"} - ${weekPatternLabel(normalizedWeekPattern(sourceAssignment))}`} onClick={() => onSelect({ kind: "edit", sessionId: sourceAssignment.sessionId })}>{weekPatternLabel(normalizedWeekPattern(sourceAssignment))}</button>)}
+                          </div> : null}
+                        </div>;
+                      }
                       return <button type="button" className="lesson-cell" key={assignment.sessionId} onClick={() => editable && onSelect({ kind: "edit", sessionId: assignment.sessionId })} disabled={!editable} aria-label={`ویرایش ${session?.subjectName ?? "جلسه"}`}>
                         {pattern !== "EVERY_WEEK" ? <em>{weekPatternLabel(pattern)}</em> : null}
                         <strong>{session?.subjectName}</strong>
@@ -328,12 +345,18 @@ function SchoolWideGrid({ data, majorId }: { data: TimetableViewData; majorId: s
                 const cellIssues = slotAssignments.flatMap((assignment) => data.issues.filter((issue) => issue.entityType === "session" && issue.entityId === assignment.sessionId));
                 const hasError = cellIssues.some((issue) => issue.severity === "ERROR");
                 const hasWarning = cellIssues.some((issue) => issue.severity === "WARNING");
+                const displayGroups = groupTimetableAssignmentsForDisplay(
+                  [...slotAssignments].sort((a, b) =>
+                    normalizedWeekPattern(a).localeCompare(normalizedWeekPattern(b)),
+                  ),
+                );
                 return (
                   <td key={`${schoolClass.id}:${position}`} className={cn("major-timetable-grid__cell", "has-lesson", hasError && "has-error", !hasError && hasWarning && "has-warning", positionIndex === 0 && "is-class-start")}>
-                    {slotAssignments.map((assignment) => {
+                    {displayGroups.map((group) => {
+                      const assignment = group.assignment;
                       const session = sessions.get(assignment.sessionId);
-                      const pattern = normalizedWeekPattern(assignment);
-                      return <div className="major-timetable-grid__lesson" key={assignment.sessionId}>
+                      const pattern = group.displayWeekPattern;
+                      return <div className="major-timetable-grid__lesson" key={group.key}>
                         {pattern !== "EVERY_WEEK" ? <em>{weekPatternLabel(pattern)}</em> : null}
                         <strong>{session?.subjectName ?? "درس"}</strong>
                         <span>{teachers.get(assignment.teacherId) ?? "دبیر تعیین نشده"}</span>

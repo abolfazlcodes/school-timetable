@@ -32,6 +32,7 @@ const migrationNames = [
   "0010_class_subject_teacher_assignments.sql",
   "0011_period_instructional_units.sql",
   "0012_teacher_partial_name.sql",
+  "0013_class_subject_teacher_allocations.sql",
 ];
 
 const ids = {

@@ -42,7 +42,13 @@ export interface CurriculumRequirement {
   subjectName: string;
   weeklyHours: number;
   sessionPattern: number[];
+  teacherAllocations?: ClassTeacherAllocation[];
+  /** Legacy single-teacher lock kept for old snapshots and callers. */
   assignedTeacherId?: string | null;
+}
+export interface ClassTeacherAllocation {
+  teacherId: string;
+  assignedWeeklyHours: number;
 }
 export interface TeacherSubjectAssignment {
   subjectId: string;
@@ -94,6 +100,71 @@ export interface ScheduleAssignment {
   weekPattern?: WeekPattern;
 }
 
+export interface AlternatingLessonIdentity {
+  classId: string;
+  curriculumId: string;
+  subjectId: string;
+  teacherId: string;
+}
+
+/**
+ * Two alternate-week lessons can directly fill one physical period when they
+ * are two parts of the same curriculum row, or when one teacher owns both
+ * lessons. A different-teacher/different-subject pair is only valid as part
+ * of a reciprocal two-class swap (see `isReciprocalAlternatingSwap`).
+ */
+export function isDirectAlternatingPair(
+  weekA: AlternatingLessonIdentity,
+  weekB: AlternatingLessonIdentity,
+) {
+  return (
+    weekA.curriculumId === weekB.curriculumId ||
+    weekA.teacherId === weekB.teacherId
+  );
+}
+
+/**
+ * Models the school practice confirmed for two classes and two teachers:
+ * week A has C1/T1/S1 + C2/T2/S2 and week B swaps those exact
+ * teacher/subject identities between the classes. This keeps both classes
+ * and both teachers occupied in the shared physical period in both weeks.
+ */
+export function isReciprocalAlternatingSwap(
+  firstWeekA: AlternatingLessonIdentity,
+  firstWeekB: AlternatingLessonIdentity,
+  secondWeekA: AlternatingLessonIdentity,
+  secondWeekB: AlternatingLessonIdentity,
+) {
+  return (
+    firstWeekA.classId === firstWeekB.classId &&
+    secondWeekA.classId === secondWeekB.classId &&
+    firstWeekA.classId !== secondWeekA.classId &&
+    firstWeekA.teacherId === secondWeekB.teacherId &&
+    firstWeekA.subjectId === secondWeekB.subjectId &&
+    firstWeekB.teacherId === secondWeekA.teacherId &&
+    firstWeekB.subjectId === secondWeekA.subjectId
+  );
+}
+
+export function alternatingSessionPairs(
+  sessions: SessionRequirement[],
+): Array<readonly [SessionRequirement, SessionRequirement]> {
+  const grouped = new Map<string, SessionRequirement[]>();
+  for (const session of sessions) {
+    grouped.set(session.curriculumId, [
+      ...(grouped.get(session.curriculumId) ?? []),
+      session,
+    ]);
+  }
+  return [...grouped.values()].flatMap((items) => {
+    const ordered = [...items].sort((left, right) => left.ordinal - right.ordinal);
+    return ordered.length === 2 &&
+      ordered.every((session) => session.workloadHours === 1)
+      ? [[ordered[0], ordered[1]] as const]
+      : [];
+  });
+}
+
 export function normalizedWeekPattern(assignment: Pick<ScheduleAssignment, "weekPattern">): WeekPattern {
   return assignment.weekPattern ?? "EVERY_WEEK";
 }
@@ -143,8 +214,9 @@ export interface SolverResult {
 export function expandSessions(
   problem: SchedulingProblem,
 ): SessionRequirement[] {
-  return problem.curriculum.flatMap((item) =>
-    item.sessionPattern.map((workloadHours, ordinal) => ({
+  return problem.curriculum.flatMap((item) => {
+    const allocatedTeachers = allocatedTeachersForSessions(item);
+    return item.sessionPattern.map((workloadHours, ordinal) => ({
       id: `${item.id}:${ordinal + 1}`,
       curriculumId: item.id,
       ordinal,
@@ -153,9 +225,71 @@ export function expandSessions(
       subjectId: item.subjectId,
       subjectName: item.subjectName,
       workloadHours,
-      assignedTeacherId: item.assignedTeacherId,
-    })),
+      assignedTeacherId:
+        allocatedTeachers?.[ordinal] ?? item.assignedTeacherId ?? null,
+    }));
+  });
+}
+
+/**
+ * Divides fixed class/subject teacher hours over the stored session pieces.
+ * A tiny deterministic backtracking pass is sufficient because a curriculum
+ * row normally contains one to four sessions. `null` means the allocation is
+ * internally inconsistent and is reported by preflight before generation.
+ */
+export function allocatedTeachersForSessions(
+  requirement: Pick<
+    CurriculumRequirement,
+    "weeklyHours" | "sessionPattern" | "teacherAllocations"
+  >,
+): Array<string | null> | null {
+  const allocations = requirement.teacherAllocations;
+  if (!allocations?.length) return requirement.sessionPattern.map(() => null);
+  if (
+    allocations.some(
+      (allocation) =>
+        !Number.isInteger(allocation.assignedWeeklyHours) ||
+        allocation.assignedWeeklyHours <= 0,
+    ) ||
+    allocations.reduce(
+      (sum, allocation) => sum + allocation.assignedWeeklyHours,
+      0,
+    ) !== requirement.weeklyHours
+  ) {
+    return null;
+  }
+
+  const remaining = allocations.map((allocation) =>
+    allocation.assignedWeeklyHours,
   );
+  const result: Array<string | null> = requirement.sessionPattern.map(
+    () => null,
+  );
+  const assign = (ordinal: number): boolean => {
+    if (ordinal === requirement.sessionPattern.length) {
+      return remaining.every((hours) => hours === 0);
+    }
+    const workload = requirement.sessionPattern[ordinal];
+    const candidates = allocations
+      .map((_, index) => index)
+      .filter((index) => remaining[index] >= workload)
+      .sort(
+        (left, right) =>
+          Number(remaining[left] !== workload) -
+            Number(remaining[right] !== workload) ||
+          left - right,
+      );
+    for (const index of candidates) {
+      remaining[index] -= workload;
+      result[ordinal] = allocations[index].teacherId;
+      if (assign(ordinal + 1)) return true;
+      result[ordinal] = null;
+      remaining[index] += workload;
+    }
+    return false;
+  };
+
+  return assign(0) ? result : null;
 }
 
 export function assignedHoursFor(teacher: TeacherResource, subjectId: string) {

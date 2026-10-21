@@ -3287,6 +3287,32 @@ tbody tr:hover {
   cursor: default;
   opacity: 1;
 }
+.lesson-cell--combined {
+  cursor: default;
+}
+.lesson-cell__week-actions {
+  width: 100%;
+  margin-top: 7px;
+  padding-top: 6px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  border-top: 1px dashed var(--color-border);
+}
+.lesson-cell__week-actions button {
+  min-height: 28px;
+  padding: 3px 5px;
+  color: var(--color-primary-700);
+  background: var(--color-primary-50);
+  border: 1px solid var(--color-primary-100);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+}
+.lesson-cell__week-actions button:hover {
+  background: var(--color-primary-100);
+}
 .lesson-cell strong {
   font-size: var(--font-size-sm);
 }

@@ -14,6 +14,7 @@ import { resolveSeedIdentity, resolveSeedProfile } from "./seed-profile.ts";
 import {
   shahidBeheshtiClasses,
   shahidBeheshtiCurriculum,
+  shahidBeheshtiLessonRows,
   shahidBeheshtiSubjectNames,
   shahidBeheshtiTeachers,
 } from "./shahid-beheshti-complete-data.ts";
@@ -389,10 +390,28 @@ try {
       }
 
       if (usesCompleteShahidData) {
-        // برنامهٔ نهایی معاون فقط یک خروجی مرجع است و نباید رابطهٔ
-        // کلاس/درس/دبیر را به قید سخت تبدیل کند. حل‌گر دبیر را از روی
-        // صلاحیت، ظرفیت سالانه و حضور انتخاب می‌کند.
+        // این تخصیص‌ها از ساعات و درس‌های تأییدشده می‌آیند، نه از محل
+        // خانه‌های برنامهٔ دستی معاون. بنابراین حل‌گر همچنان زمان را از صفر
+        // می‌سازد، اما حق ندارد درس یک کلاس را به دبیر دیگری واگذار کند.
         await transaction`DELETE FROM class_subject_teacher_assignments WHERE school_id = ${target.schoolId} AND academic_year_id = ${target.yearId}`;
+        for (const lesson of shahidBeheshtiLessonRows) {
+          const allocations =
+            lesson.teacherAllocations ?? [
+              { teacherKey: lesson.teacherKey, hours: lesson.hours },
+            ];
+          for (const allocation of allocations) {
+            await transaction`INSERT INTO class_subject_teacher_assignments
+              (school_id, academic_year_id, class_id, subject_id, teacher_id, assigned_weekly_hours)
+              VALUES (
+                ${target.schoolId},
+                ${target.yearId},
+                ${referenceId(target.schoolId, `class:${lesson.classKey}`)},
+                ${subjectIds.get(lesson.subject)!},
+                ${referenceId(target.schoolId, `teacher:${allocation.teacherKey}`)},
+                ${allocation.hours}
+              )`;
+          }
+        }
 
         // هاشمی یک رکورد منسوخ از snapshot قبلی seed است. حذف فیزیکی فقط برای
         // همین شناسهٔ قطعی fixture انجام می‌شود تا در فهرست عملیاتی دیده نشود؛

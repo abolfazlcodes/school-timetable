@@ -24,7 +24,11 @@ const connectionString = process.env.DATABASE_URL;
 if (!connectionString) throw new Error("DATABASE_URL تنظیم نشده است.");
 const seedProfile = resolveSeedProfile(process.env.SEED_PROFILE);
 const isDeliverySeed = seedProfile === "shahid-beheshti";
-const seedIdentity = resolveSeedIdentity(seedProfile);
+const preserveExistingDeliveryAccounts =
+  isDeliverySeed && process.env.SEED_PRESERVE_EXISTING_ACCOUNTS === "true";
+const seedIdentity = preserveExistingDeliveryAccounts
+  ? null
+  : resolveSeedIdentity(seedProfile);
 
 const ids = {
   admin: "10000000-0000-4000-8000-000000000001",
@@ -43,10 +47,12 @@ const ids = {
   teacherB: "35000000-0000-4000-8000-000000000002",
 };
 
-const [adminPasswordHash, vicePrincipalPasswordHash] = await Promise.all([
-  hashPassword(seedIdentity.admin.password),
-  hashPassword(seedIdentity.vicePrincipal.password),
-]);
+const [adminPasswordHash, vicePrincipalPasswordHash] = seedIdentity
+  ? await Promise.all([
+      hashPassword(seedIdentity.admin.password),
+      hashPassword(seedIdentity.vicePrincipal.password),
+    ])
+  : [null, null];
 const sql = postgres(connectionString, { max: 1 });
 
 try {
@@ -63,10 +69,21 @@ try {
       }
     }
 
-    await transaction`INSERT INTO users (id, email, full_name, password_hash)
-      VALUES (${ids.admin}, ${seedIdentity.admin.email}, ${seedIdentity.admin.fullName}, ${adminPasswordHash}),
-             (${ids.vicePrincipal}, ${seedIdentity.vicePrincipal.email}, ${seedIdentity.vicePrincipal.fullName}, ${vicePrincipalPasswordHash})
-      ON CONFLICT (id) DO UPDATE SET email = excluded.email, full_name = excluded.full_name, password_hash = excluded.password_hash, is_active = true, updated_at = now()`;
+    if (preserveExistingDeliveryAccounts) {
+      const existingAccounts = await transaction`
+        SELECT id FROM users WHERE id IN (${ids.admin}, ${ids.vicePrincipal})
+      `;
+      if (existingAccounts.length !== 2) {
+        throw new Error(
+          "حالت حفظ حساب‌ها فقط وقتی مجاز است که هر دو حساب تحویلی از قبل وجود داشته باشند.",
+        );
+      }
+    } else if (seedIdentity && adminPasswordHash && vicePrincipalPasswordHash) {
+      await transaction`INSERT INTO users (id, email, full_name, password_hash)
+        VALUES (${ids.admin}, ${seedIdentity.admin.email}, ${seedIdentity.admin.fullName}, ${adminPasswordHash}),
+               (${ids.vicePrincipal}, ${seedIdentity.vicePrincipal.email}, ${seedIdentity.vicePrincipal.fullName}, ${vicePrincipalPasswordHash})
+        ON CONFLICT (id) DO UPDATE SET email = excluded.email, full_name = excluded.full_name, password_hash = excluded.password_hash, is_active = true, updated_at = now()`;
+    }
 
     if (isDeliverySeed) {
       await transaction`INSERT INTO schools (id, name, code, province, city, phone)
@@ -428,14 +445,19 @@ try {
   });
   if (isDeliverySeed) {
     console.log("Delivery data seeded: دبیرستان شهید بهشتی و دو حساب مجاز.");
-    console.log(`Admin: ${seedIdentity.admin.email}`);
-    console.log(
-      `Vice principal: ${seedIdentity.vicePrincipal.email} / حمید باقری`,
-    );
-    console.log(
-      "Passwords were read from environment variables and are not printed.",
-    );
+    if (preserveExistingDeliveryAccounts) {
+      console.log("Existing delivery accounts and password hashes were preserved.");
+    } else if (seedIdentity) {
+      console.log(`Admin: ${seedIdentity.admin.email}`);
+      console.log(
+        `Vice principal: ${seedIdentity.vicePrincipal.email} / حمید باقری`,
+      );
+      console.log(
+        "Passwords were read from environment variables and are not printed.",
+      );
+    }
   } else {
+    if (!seedIdentity) throw new Error("Demo seed identity is missing.");
     console.log("Demo data seeded.");
     console.log(`${seedIdentity.admin.email} / ${seedIdentity.admin.password}`);
     console.log(
